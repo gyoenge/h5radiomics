@@ -132,44 +132,44 @@ def load_segmentation_parquet(parquet_path):
 # =========================
 # 4. patch와 겹치는 cell 추출
 # =========================
-def get_cells_for_patch(seg_df, patch_coord, patch_w, patch_h):
-    """
-    patch_coord = (x0, y0) in WSI coordinates
-    patch bbox와 intersect하는 geometry만 추출하고,
-    patch local 좌표계로 이동한 geometry_local 컬럼을 추가한다.
-    """
-    x0, y0 = float(patch_coord[0]), float(patch_coord[1])
-    patch_bbox = box(x0, y0, x0 + patch_w, y0 + patch_h)
+def get_cells_for_patch(seg_df, patch_coord, patch_w, patch_h, mode="topleft", scale=1.0):
+    x, y = float(patch_coord[0]), float(patch_coord[1])
 
-    # 1) patch와 겹치는 후보만 추출
+    w = patch_w * scale
+    h = patch_h * scale
+
+    if mode == "topleft":
+        x0, y0 = x, y
+        x1, y1 = x + w, y + h
+    elif mode == "center":
+        x0, y0 = x - w / 2, y - h / 2
+        x1, y1 = x + w / 2, y + h / 2
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+    patch_bbox = box(x0, y0, x1, y1)
+
     intersects_mask = seg_df["geometry"].apply(lambda g: g.intersects(patch_bbox))
     sub = seg_df.loc[intersects_mask].copy()
 
     if len(sub) == 0:
         sub["geometry_local"] = pd.Series(dtype=object)
-        return sub
+        return sub, (x0, y0, x1, y1)
 
-    # 2) 실제 patch bbox로 clip
     clipped = sub["geometry"].apply(lambda g: g.intersection(patch_bbox))
-
-    # 3) empty 제거
     valid_mask = clipped.apply(lambda g: not g.is_empty)
     sub = sub.loc[valid_mask].copy()
     clipped = clipped.loc[valid_mask]
 
     if len(sub) == 0:
         sub["geometry_local"] = pd.Series(dtype=object)
-        return sub
+        return sub, (x0, y0, x1, y1)
 
-    # 4) patch local 좌표계로 이동
     sub["geometry_local"] = clipped.apply(
         lambda g: translate(g, xoff=-x0, yoff=-y0)
     ).values
 
-    print(f"[DEBUG] total cells: {len(seg_df)}")
-    print(f"[DEBUG] intersected cells: {intersects_mask.sum()}")
-
-    return sub
+    return sub, (x0, y0, x1, y1)
 
 
 # =========================
@@ -412,12 +412,36 @@ def visualize_h5_patch_with_segmentation(
     print(f"[INFO] img shape : {img_hwc.shape}")
 
     seg_df = load_segmentation_parquet(parquet_path)
-    matched_df = get_cells_for_patch(seg_df, coord, patch_w, patch_h)
+    matched_df, patch_bbox = get_cells_for_patch(
+        seg_df, coord, patch_w, patch_h,
+        mode="topleft",
+        scale=2.0
+    )
+    
+    ### for debug
+    # for mode in ["topleft", "center"]:
+    #     for scale in [1.0, 2.0, 4.0, 8.0]:
+    #         matched_df_tmp, bbox_tmp = get_cells_for_patch(
+    #             seg_df, coord, patch_w, patch_h, mode=mode, scale=scale
+    #         )
+    #         print(f"[DEBUG] mode={mode}, scale={scale}, bbox={bbox_tmp}, matched={len(matched_df_tmp)}")
+    ### 
 
     print(f"[INFO] matched cells: {len(matched_df)}")
     if len(matched_df) > 0:
         cols_to_show = [c for c in ["class", "cell_id"] if c in matched_df.columns]
         print(matched_df[cols_to_show].head(max_cells_print))
+
+    # matched_df 구하기 직전이나 직후
+    print("[DEBUG] patch bbox:", patch_bbox)
+    print("[DEBUG] first geometry bounds:", seg_df["geometry"].iloc[0].bounds)
+    print("[DEBUG] all geometry total bounds:",
+        (
+            min(g.bounds[0] for g in seg_df["geometry"]),
+            min(g.bounds[1] for g in seg_df["geometry"]),
+            max(g.bounds[2] for g in seg_df["geometry"]),
+            max(g.bounds[3] for g in seg_df["geometry"]),
+        ))
 
     title = f"patch_idx={patch_idx}, barcode={barcode}, matched_cells={len(matched_df)}"
 
