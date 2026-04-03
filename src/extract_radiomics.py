@@ -28,7 +28,7 @@ import SimpleITK as sitk
 from radiomics import featureextractor
 from PIL import Image
 
-from extract_radiomics_utils import (
+from h5radiomics.src.utils import (
     get_img_key,
     get_coords_key,
     get_barcodes_key,
