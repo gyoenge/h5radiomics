@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 from shapely import wkb
 from shapely.geometry import box, Polygon, MultiPolygon
-from shapely.affinity import translate
+from shapely.affinity import translate, scale as shapely_scale
 from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.collections import PatchCollection
 
@@ -19,6 +19,9 @@ from matplotlib.collections import PatchCollection
 #     load_h5_patches,
 #     show_patch,
 # )
+
+def shapely_scale_geometry(geom, sx, sy):
+    return shapely_scale(geom, xfact=sx, yfact=sy, origin=(0, 0))
 
 ################################# 
 
@@ -28,6 +31,15 @@ from matplotlib.collections import PatchCollection
 # SAMPLES = ["NCBI783", "NCBI785", "TENX95", "TENX99"]
 OUTPUT_DIR = "/root/workspace/h5radiomics/output_test/vis_seg"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+FULL_RES_W = 51351 
+FULL_RES_H = 107121
+
+PIXEL_SIZE_UM_EMBEDDED = 1.0
+PIXEL_SIZE_UM_FULLRES = 0.2125
+
+H5_TO_FULLRES_SCALE = PIXEL_SIZE_UM_EMBEDDED / PIXEL_SIZE_UM_FULLRES
+# 4.705882352941177
 
 ### 
 
@@ -78,7 +90,6 @@ def load_h5_patch(h5_path, patch_idx):
     barcode = barcode_raw.decode("utf-8") if isinstance(barcode_raw, bytes) else str(barcode_raw)
 
     return img, coord, barcode
-
 
 # =========================
 # 2. 이미지 shape 정리
@@ -171,6 +182,142 @@ def get_cells_for_patch(seg_df, patch_coord, patch_w, patch_h, mode="topleft", s
 
     return sub, (x0, y0, x1, y1)
 
+def get_cells_for_patch_fullres(
+    seg_df,
+    patch_coord,
+    patch_w,
+    patch_h,
+    coord_scale_x=1.0,
+    coord_scale_y=1.0,
+    patch_scale_x=None,
+    patch_scale_y=None,
+    mode="topleft",
+):
+    """
+    h5 patch coord를 full-resolution 좌표계로 환산해서 parquet geometry와 매칭한다.
+
+    patch_coord : h5 coord
+    patch_w/h   : patch image pixel size (예: 224, 224)
+
+    coord_scale_x/y :
+        h5 coord -> fullres 좌표계 변환 scale
+
+    patch_scale_x/y :
+        patch image 1 pixel이 fullres에서 몇 pixel에 해당하는지
+        None이면 coord scale과 동일하게 둠
+    """
+    x, y = float(patch_coord[0]), float(patch_coord[1])
+
+    if patch_scale_x is None:
+        patch_scale_x = coord_scale_x
+    if patch_scale_y is None:
+        patch_scale_y = coord_scale_y
+
+    # h5 coord -> fullres 좌표
+    x_full = x * coord_scale_x
+    y_full = y * coord_scale_y
+
+    # patch 크기도 fullres 기준으로 변환
+    w_full = patch_w * patch_scale_x
+    h_full = patch_h * patch_scale_y
+
+    if mode == "topleft":
+        x0, y0 = x_full, y_full
+        x1, y1 = x_full + w_full, y_full + h_full
+    elif mode == "center":
+        x0, y0 = x_full - w_full / 2, y_full - h_full / 2
+        x1, y1 = x_full + w_full / 2, y_full + h_full / 2
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+    patch_bbox = box(x0, y0, x1, y1)
+
+    intersects_mask = seg_df["geometry"].apply(lambda g: g.intersects(patch_bbox))
+    sub = seg_df.loc[intersects_mask].copy()
+
+    if len(sub) == 0:
+        sub["geometry_local"] = pd.Series(dtype=object)
+        return sub, (x0, y0, x1, y1)
+
+    clipped = sub["geometry"].apply(lambda g: g.intersection(patch_bbox))
+    valid_mask = clipped.apply(lambda g: not g.is_empty)
+    sub = sub.loc[valid_mask].copy()
+    clipped = clipped.loc[valid_mask]
+
+    if len(sub) == 0:
+        sub["geometry_local"] = pd.Series(dtype=object)
+        return sub, (x0, y0, x1, y1)
+
+    # fullres local -> patch pixel local 로 환산
+    sub["geometry_local"] = clipped.apply(
+        lambda g: translate(g, xoff=-x0, yoff=-y0)
+    ).apply(
+        lambda g: shapely_scale_geometry(g, 1.0 / patch_scale_x, 1.0 / patch_scale_y)
+    ).values
+
+    return sub, (x0, y0, x1, y1)
+
+def get_cells_for_patch_coord_fixed_patch_scaled(
+    seg_df,
+    patch_coord,
+    patch_w,
+    patch_h,
+    patch_scale=1.0,
+    mode="topleft",
+):
+    x, y = float(patch_coord[0]), float(patch_coord[1])
+
+    w_full = patch_w * patch_scale
+    h_full = patch_h * patch_scale
+
+    if mode == "topleft":
+        x0, y0 = x, y
+        x1, y1 = x + w_full, y + h_full
+    elif mode == "center":
+        x0, y0 = x - w_full / 2, y - h_full / 2
+        x1, y1 = x + w_full / 2, y + h_full / 2
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+    patch_bbox = box(x0, y0, x1, y1)
+
+    intersects_mask = seg_df["geometry"].apply(lambda g: g.intersects(patch_bbox))
+    sub = seg_df.loc[intersects_mask].copy()
+
+    if len(sub) == 0:
+        sub["geometry_local"] = pd.Series(dtype=object)
+        return sub, (x0, y0, x1, y1)
+
+    clipped = sub["geometry"].apply(lambda g: g.intersection(patch_bbox))
+    valid_mask = clipped.apply(lambda g: not g.is_empty)
+    sub = sub.loc[valid_mask].copy()
+    clipped = clipped.loc[valid_mask]
+
+    if len(sub) == 0:
+        sub["geometry_local"] = pd.Series(dtype=object)
+        return sub, (x0, y0, x1, y1)
+
+    # fullres local -> patch pixel local
+    sx = patch_w / (x1 - x0)
+    sy = patch_h / (y1 - y0)
+
+    sub["geometry_local"] = clipped.apply(
+        lambda g: translate(g, xoff=-x0, yoff=-y0)
+    ).apply(
+        lambda g: shapely_scale(g, xfact=sx, yfact=sy, origin=(0, 0))
+    ).values
+
+    return sub, (x0, y0, x1, y1)
+
+def clip_local_geometries_to_patch(matched_df, patch_w, patch_h, geometry_col="geometry_local"):
+    patch_box_local = box(0, 0, patch_w, patch_h)
+
+    clipped = matched_df[geometry_col].apply(lambda g: g.intersection(patch_box_local))
+    valid_mask = clipped.apply(lambda g: not g.is_empty)
+
+    out = matched_df.loc[valid_mask].copy()
+    out[geometry_col] = clipped.loc[valid_mask].values
+    return out
 
 # =========================
 # 5. shapely geometry -> matplotlib patch
@@ -412,59 +559,46 @@ def visualize_h5_patch_with_segmentation(
     print(f"[INFO] img shape : {img_hwc.shape}")
 
     seg_df = load_segmentation_parquet(parquet_path)
-    matched_df, patch_bbox = get_cells_for_patch(
-        seg_df, coord, patch_w, patch_h,
+
+    patch_scale = PIXEL_SIZE_UM_EMBEDDED / PIXEL_SIZE_UM_FULLRES
+
+    matched_df, patch_bbox = get_cells_for_patch_coord_fixed_patch_scaled(
+        seg_df=seg_df,
+        patch_coord=coord,
+        patch_w=patch_w,
+        patch_h=patch_h,
+        patch_scale=patch_scale,
         mode="topleft",
-        scale=2.0
     )
-    
-    ### for debug
-    # for mode in ["topleft", "center"]:
-    #     for scale in [1.0, 2.0, 4.0, 8.0]:
-    #         matched_df_tmp, bbox_tmp = get_cells_for_patch(
-    #             seg_df, coord, patch_w, patch_h, mode=mode, scale=scale
-    #         )
-    #         print(f"[DEBUG] mode={mode}, scale={scale}, bbox={bbox_tmp}, matched={len(matched_df_tmp)}")
-    ### 
 
-    print(f"[INFO] matched cells: {len(matched_df)}")
-    if len(matched_df) > 0:
-        cols_to_show = [c for c in ["class", "cell_id"] if c in matched_df.columns]
-        print(matched_df[cols_to_show].head(max_cells_print))
+    matched_df_vis = clip_local_geometries_to_patch(matched_df, patch_w, patch_h)
 
-    # matched_df 구하기 직전이나 직후
-    print("[DEBUG] patch bbox:", patch_bbox)
-    print("[DEBUG] first geometry bounds:", seg_df["geometry"].iloc[0].bounds)
-    print("[DEBUG] all geometry total bounds:",
-        (
-            min(g.bounds[0] for g in seg_df["geometry"]),
-            min(g.bounds[1] for g in seg_df["geometry"]),
-            max(g.bounds[2] for g in seg_df["geometry"]),
-            max(g.bounds[3] for g in seg_df["geometry"]),
-        ))
+    print(f"[INFO] matched cells (fullres bbox): {len(matched_df)}")
+    print(f"[INFO] visible cells in patch: {len(matched_df_vis)}")
+    print(f"[DEBUG] patch bbox(fullres): {patch_bbox}")
 
-    title = f"patch_idx={patch_idx}, barcode={barcode}, matched_cells={len(matched_df)}"
-
-    filename = f"{barcode}_idx{patch_idx}_cells{len(matched_df)}.png"
+    title = f"patch_idx={patch_idx}, barcode={barcode}, visible_cells={len(matched_df_vis)}"
+    filename = f"{barcode}_idx{patch_idx}_cells{len(matched_df_vis)}.png"
     save_path = os.path.join(OUTPUT_DIR, filename)
 
-    if len(matched_df) == 0:
-        print("[WARN] No matched cells → saving patch only")
+    if len(matched_df_vis) == 0:
+        print("[WARN] No visible cells → saving patch only")
         save_patch_only(
             img_hwc,
             save_path,
-            title=f"{barcode} (NO CELLS)"
+            title=f"{barcode} (NO VISIBLE CELLS)"
         )
     else:
         save_patch_overlay(
             img=img_hwc,
-            matched_df=matched_df,
+            matched_df=matched_df_vis,
             save_path=save_path,
             title=title,
             show_boundary=True,
             boundary_color="lime",
-            boundary_linewidth=0.7,
+            boundary_linewidth=1.2,
             show_fill=False,
+            fill_alpha=0.0,
         )
 
     print(f"[INFO] saved to: {save_path}")
