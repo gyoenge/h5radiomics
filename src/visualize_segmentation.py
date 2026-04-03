@@ -26,7 +26,8 @@ from matplotlib.collections import PatchCollection
 # SEG_ROOT = "/root/workspace/h5radiomics/segmentation"
 # PATCH_ROOT = "/root/workspace/h5radiomics/h5"
 # SAMPLES = ["NCBI783", "NCBI785", "TENX95", "TENX99"]
-# OUTPUT_DIR = "/root/workspace/impl/h5radiomics_draft/output_test/vis_seg"
+OUTPUT_DIR = "/root/workspace/h5radiomics/output_test/vis_seg"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 ### 
 
@@ -284,6 +285,90 @@ def visualize_patch_only(img, title=None):
     plt.tight_layout()
     plt.show()
 
+def save_patch_overlay(
+    img,
+    matched_df,
+    save_path,
+    class_col="class",
+    geometry_col="geometry_local",
+    figsize=(8, 8),
+    title=None,
+    show_boundary=True,
+    boundary_color="lime",
+    boundary_linewidth=0.8,
+    show_fill=False,
+    fill_alpha=0.25,
+):
+    img_hwc = ensure_hwc(img)
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    if img_hwc.ndim == 2:
+        ax.imshow(img_hwc, cmap="gray")
+    else:
+        if np.issubdtype(img_hwc.dtype, np.floating):
+            show_img = np.clip(img_hwc, 0, 1)
+        else:
+            show_img = img_hwc
+        ax.imshow(show_img)
+
+    all_patches = []
+    for geom in matched_df[geometry_col]:
+        all_patches.extend(geometry_to_mpl_patches(geom))
+
+    if len(all_patches) > 0:
+        if show_fill:
+            fill_collection = PatchCollection(
+                all_patches,
+                facecolor="red",
+                edgecolor="none",
+                alpha=fill_alpha,
+                zorder=2,
+            )
+            ax.add_collection(fill_collection)
+
+        if show_boundary:
+            edge_collection = PatchCollection(
+                all_patches,
+                facecolor="none",
+                edgecolor=boundary_color,
+                linewidth=boundary_linewidth,
+                zorder=3,
+            )
+            ax.add_collection(edge_collection)
+
+    if title:
+        ax.set_title(title)
+
+    ax.set_axis_off()
+    plt.tight_layout()
+
+    plt.savefig(save_path, dpi=150)
+    plt.close(fig)   # 중요 (메모리 누수 방지)
+
+def save_patch_only(img, save_path, title=None):
+    img_hwc = ensure_hwc(img)
+
+    fig = plt.figure(figsize=(6, 6))
+
+    if img_hwc.ndim == 2:
+        plt.imshow(img_hwc, cmap="gray")
+    else:
+        if np.issubdtype(img_hwc.dtype, np.floating):
+            img_show = np.clip(img_hwc, 0, 1)
+        else:
+            img_show = img_hwc
+        plt.imshow(img_show)
+
+    if title:
+        plt.title(title)
+
+    plt.axis("off")
+    plt.tight_layout()
+
+    plt.savefig(save_path, dpi=150)
+    plt.close(fig)
+
 
 # =========================
 # 7. barcode 또는 index로 patch 찾기
@@ -336,23 +421,29 @@ def visualize_h5_patch_with_segmentation(
 
     title = f"patch_idx={patch_idx}, barcode={barcode}, matched_cells={len(matched_df)}"
 
+    filename = f"{barcode}_idx{patch_idx}_cells{len(matched_df)}.png"
+    save_path = os.path.join(OUTPUT_DIR, filename)
+
     if len(matched_df) == 0:
-        print("[WARN] No matched cells → showing patch only")
-        visualize_patch_only(
+        print("[WARN] No matched cells → saving patch only")
+        save_patch_only(
             img_hwc,
-            title=f"patch_idx={patch_idx}, barcode={barcode} (NO CELLS)"
+            save_path,
+            title=f"{barcode} (NO CELLS)"
         )
     else:
-        visualize_patch_overlay(
+        save_patch_overlay(
             img=img_hwc,
             matched_df=matched_df,
-            figsize=figsize,
+            save_path=save_path,
             title=title,
             show_boundary=True,
             boundary_color="lime",
             boundary_linewidth=0.7,
             show_fill=False,
         )
+
+    print(f"[INFO] saved to: {save_path}")
 
     return {
         "patch_idx": patch_idx,
@@ -374,7 +465,7 @@ if __name__ == "__main__":
     result = visualize_h5_patch_with_segmentation(
         h5_path=h5_path,
         parquet_path=parquet_path,
-        patch_idx=0,
+        patch_idx=400,  # trials: 0 
         figsize=(8, 8),
     )
 
