@@ -210,8 +210,12 @@ __marimo__/
 #############
 
 # h5 files
+h5/
 *.h5
 
 # parquet files
+segmentation/
 *.parquet
 
+# test files 
+output_test/*
