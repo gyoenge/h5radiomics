@@ -1,5 +1,5 @@
-# extract_radiomics_utils.py
-# Utility functions for radiomics feature extraction from HDF5 files containing image patches and associated metadata
+# utils.py
+# Utility functions for HDF5 files containing image patches and associated metadata
 import numpy as np
 
 def get_img_key(f):
