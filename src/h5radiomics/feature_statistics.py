@@ -15,7 +15,7 @@ python -m h5radiomics.feature_statistics \
   --output_root /root/workspace/h5radiomics/output_test/statistics \
   --status_filter ok \
   --save_representatives true \
-  --representative_image_col color_path
+  --save_boxplot true
 """
 
 import os
@@ -25,6 +25,7 @@ import argparse
 import yaml
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 
 # =========================
@@ -45,6 +46,9 @@ def get_default_config():
         "save_representatives": True,
         "representative_image_col": "color_path",  # fallback: gray_path -> mask_path
         "representative_stats": ["min", "q10", "q25", "q50", "q75", "q90", "max"],
+
+        # boxplot option
+        "save_boxplot": True,
     }
 
 
@@ -365,6 +369,100 @@ def save_representative_patches(df, feature_cols, output_dir, config, prefix="sa
     return manifest_csv
 
 
+def save_sample_feature_boxplot(df, feature_cols, output_dir, prefix):
+    """
+    Save one combined boxplot image per sample.
+
+    Output:
+      {output_dir}/{prefix}_feature_boxplot.png
+
+    X-axis: feature names
+    Y-axis: feature value distribution
+    Overlay: representative patch positions for
+             min, q10, q25, q50, q75, q90, max
+    """
+    if len(feature_cols) == 0:
+        return None
+
+    requested_stats = ["min", "q10", "q25", "q50", "q75", "q90", "max"]
+
+    data_for_boxplot = []
+    scatter_x = []
+    scatter_y = []
+
+    for i, feature_col in enumerate(feature_cols, start=1):
+        s = pd.to_numeric(df[feature_col], errors="coerce").dropna()
+        if len(s) == 0:
+            data_for_boxplot.append(np.array([np.nan]))
+            continue
+
+        data_for_boxplot.append(s.values)
+
+        stat_targets = get_target_stat_values(df[feature_col])
+        if stat_targets is None:
+            continue
+
+        for stat_name in requested_stats:
+            target_value = stat_targets[stat_name]
+            row, _ = select_representative_row(
+                df=df,
+                feature_col=feature_col,
+                target_value=target_value,
+                stat_name=stat_name,
+            )
+            if row is None:
+                continue
+
+            actual_value = pd.to_numeric(row[feature_col], errors="coerce")
+            if pd.isna(actual_value):
+                continue
+
+            scatter_x.append(i)
+            scatter_y.append(float(actual_value))
+
+    # feature 수에 비례해서 figure width 조절
+    fig_width = max(16, len(feature_cols) * 0.22)
+    fig_height = 6
+
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
+    ax.boxplot(
+        data_for_boxplot,
+        showfliers=False,
+        patch_artist=False,
+        widths=0.5,
+    )
+
+    if len(scatter_x) > 0:
+        ax.scatter(
+            scatter_x,
+            scatter_y,
+            s=10,
+            alpha=0.9,
+        )
+
+    ax.set_title(
+        f"Radiomics Feature Distribution\nRepresentative patch position overlay",
+        fontsize=11
+    )
+    ax.set_xlabel("Feature")
+    ax.set_ylabel("Feature value")
+
+    ax.set_xticks(range(1, len(feature_cols) + 1))
+    ax.set_xticklabels(feature_cols, rotation=90, fontsize=7)
+
+    ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+    plt.tight_layout()
+
+    save_path = os.path.join(output_dir, f"{prefix}_feature_boxplot.png")
+    plt.savefig(save_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+    print(f"[INFO] Saved sample feature boxplot: {save_path}")
+    return save_path
+
+
 # =========================
 # Main logic
 # =========================
@@ -410,6 +508,14 @@ def process_single_sample(sample_id, config):
             feature_cols=feature_cols,
             output_dir=output_dir,
             config=config,
+            prefix=sample_id,
+        )
+
+    if config.get("save_boxplot", False):
+        save_sample_feature_boxplot(
+            df=df,
+            feature_cols=feature_cols,
+            output_dir=output_dir,
             prefix=sample_id,
         )
 
@@ -490,6 +596,9 @@ def parse_args(args=None):
                         help="true/false")
     parser.add_argument("--representative_image_col", type=str, default=None,
                         help='Preferred image column: color_path / gray_path / mask_path')
+    
+    parser.add_argument("--save_boxplot", type=str, default=None,
+                        help="true/false")
 
     return parser.parse_args(args)
 
@@ -512,6 +621,7 @@ def normalize_config_types(config):
     config["save_per_sample"] = str_to_bool(config.get("save_per_sample"))
     config["save_merged"] = str_to_bool(config.get("save_merged"))
     config["save_representatives"] = str_to_bool(config.get("save_representatives"))
+    config["save_boxplot"] = str_to_bool(config.get("save_boxplot"))
 
     if config.get("status_filter") in ("None", "none", ""):
         config["status_filter"] = None
