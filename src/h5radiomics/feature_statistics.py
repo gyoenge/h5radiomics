@@ -1,6 +1,6 @@
 # feature_statistics.py
 """
-Saved radiomics feature CSV files -> feature-wise statistics
+Saved radiomics feature CSV files -> feature-wise statistics + representative patches
 
 Example usage:
 
@@ -13,10 +13,14 @@ python -m h5radiomics.feature_statistics \
   --sample_ids TENX95 NCBI785 NCBI783 TENX99 \
   --input_root /root/workspace/h5radiomics/output_test \
   --output_root /root/workspace/h5radiomics/output_test/statistics \
-  --status_filter ok
+  --status_filter ok \
+  --save_representatives true \
+  --representative_image_col color_path
 """
 
 import os
+import re
+import shutil
 import argparse
 import yaml
 import numpy as np
@@ -32,10 +36,15 @@ def get_default_config():
         "sample_ids": ["TENX95", "NCBI785", "NCBI783", "TENX99"],
         "input_root": "/root/workspace/impl/h5radiomics/output",
         "output_root": "/root/workspace/impl/h5radiomics/statistics",
-        "status_filter": "ok",  # None or "ok"
+        "status_filter": "ok",   # None or "ok"
         "drop_diagnostic": True,
         "save_per_sample": True,
         "save_merged": True,
+
+        # representative patch options
+        "save_representatives": True,
+        "representative_image_col": "color_path",  # fallback: gray_path -> mask_path
+        "representative_stats": ["min", "q10", "q25", "q50", "q75", "q90", "max"],
     }
 
 
@@ -103,7 +112,6 @@ def get_feature_columns(df, drop_diagnostic=True):
     }
 
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-
     feature_cols = [c for c in numeric_cols if c not in meta_cols]
 
     if drop_diagnostic:
@@ -131,9 +139,12 @@ def compute_feature_statistics(df, feature_cols):
             "min": s.min(),
             "q01": s.quantile(0.01),
             "q05": s.quantile(0.05),
+            "q10": s.quantile(0.10),
             "q25": s.quantile(0.25),
             "median": s.median(),
+            "q50": s.quantile(0.50),
             "q75": s.quantile(0.75),
+            "q90": s.quantile(0.90),
             "q95": s.quantile(0.95),
             "q99": s.quantile(0.99),
             "max": s.max(),
@@ -161,11 +172,197 @@ def summarize_dataset(df, feature_cols):
 
 def save_statistics(stats_df, output_dir, prefix):
     os.makedirs(output_dir, exist_ok=True)
-
     csv_path = os.path.join(output_dir, f"{prefix}_feature_statistics.csv")
     stats_df.to_csv(csv_path, index=False)
-
     return csv_path
+
+
+def sanitize_filename(text):
+    text = str(text)
+    text = re.sub(r"[^\w\-.]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    return text[:180] if len(text) > 180 else text
+
+
+def ensure_dir(path):
+    os.makedirs(path, exist_ok=True)
+
+
+def resolve_patch_path(row, preferred_col="color_path"):
+    """
+    Priority:
+      1) preferred_col
+      2) color_path
+      3) gray_path
+      4) mask_path
+    """
+    candidates = [preferred_col, "color_path", "gray_path", "mask_path"]
+    seen = set()
+
+    for col in candidates:
+        if col in seen:
+            continue
+        seen.add(col)
+
+        if col in row.index:
+            v = row[col]
+            if pd.notna(v) and str(v).strip() != "":
+                return str(v)
+
+    return None
+
+
+def get_target_stat_values(series):
+    """
+    Return desired representative target values for one feature.
+    """
+    s = pd.to_numeric(series, errors="coerce").dropna()
+    if len(s) == 0:
+        return None
+
+    return {
+        "min": s.min(),
+        "q10": s.quantile(0.10),
+        "q25": s.quantile(0.25),
+        "q50": s.quantile(0.50),
+        "q75": s.quantile(0.75),
+        "q90": s.quantile(0.90),
+        "max": s.max(),
+    }
+
+
+def select_representative_row(df, feature_col, target_value, stat_name):
+    """
+    Select one actual patch row closest to target_value.
+
+    - min/max: exact idxmin/idxmax
+    - quantiles: nearest actual value
+    """
+    temp = df.copy()
+    temp[feature_col] = pd.to_numeric(temp[feature_col], errors="coerce")
+    temp = temp[temp[feature_col].notna()].copy()
+
+    if len(temp) == 0:
+        return None, None
+
+    if stat_name == "min":
+        idx = temp[feature_col].idxmin()
+    elif stat_name == "max":
+        idx = temp[feature_col].idxmax()
+    else:
+        temp["_abs_diff_"] = (temp[feature_col] - target_value).abs()
+        idx = temp["_abs_diff_"].idxmin()
+
+    row = temp.loc[idx]
+    actual_value = float(row[feature_col])
+    abs_diff = abs(actual_value - float(target_value))
+    return row, abs_diff
+
+
+def save_representative_patches(df, feature_cols, output_dir, config, prefix="sample"):
+    """
+    Save representative patch images for each feature into:
+
+      {output_dir}/representative/{feature_name}/{stat_name}__patch{patch_idx}.png
+
+    Also save manifest CSV:
+      {output_dir}/representative/representative_manifest.csv
+    """
+    rep_root = os.path.join(output_dir, "representative")
+    ensure_dir(rep_root)
+
+    requested_stats = config.get("representative_stats", ["min", "q10", "q25", "q50", "q75", "q90", "max"])
+    preferred_image_col = config.get("representative_image_col", "color_path")
+
+    manifest_rows = []
+
+    for i, feature_col in enumerate(feature_cols, start=1):
+        print(f"[INFO] Representative {i}/{len(feature_cols)} : {feature_col}")
+
+        stat_targets = get_target_stat_values(df[feature_col])
+        if stat_targets is None:
+            continue
+
+        feature_dir = os.path.join(rep_root, sanitize_filename(feature_col))
+        ensure_dir(feature_dir)
+
+        for stat_name in requested_stats:
+            if stat_name not in stat_targets:
+                continue
+
+            target_value = stat_targets[stat_name]
+            row, abs_diff = select_representative_row(
+                df=df,
+                feature_col=feature_col,
+                target_value=target_value,
+                stat_name=stat_name,
+            )
+
+            if row is None:
+                manifest_rows.append({
+                    "feature_name": feature_col,
+                    "stat_name": stat_name,
+                    "target_value": target_value,
+                    "selected_value": np.nan,
+                    "abs_diff": np.nan,
+                    "patch_idx": np.nan,
+                    "barcode": "",
+                    "sample_id": row["sample_id"] if (row is not None and "sample_id" in row.index) else prefix,
+                    "source_path": "",
+                    "saved_path": "",
+                    "status": "no_valid_row",
+                })
+                continue
+
+            src_path = resolve_patch_path(row, preferred_col=preferred_image_col)
+            if src_path is None or not os.path.exists(src_path):
+                manifest_rows.append({
+                    "feature_name": feature_col,
+                    "stat_name": stat_name,
+                    "target_value": float(target_value),
+                    "selected_value": float(row[feature_col]),
+                    "abs_diff": float(abs_diff),
+                    "patch_idx": row["patch_idx"] if "patch_idx" in row.index else np.nan,
+                    "barcode": row["barcode"] if "barcode" in row.index else "",
+                    "sample_id": row["sample_id"] if "sample_id" in row.index else prefix,
+                    "source_path": src_path if src_path is not None else "",
+                    "saved_path": "",
+                    "status": "missing_source_image",
+                })
+                continue
+
+            patch_idx = row["patch_idx"] if "patch_idx" in row.index else "na"
+            barcode = row["barcode"] if "barcode" in row.index else ""
+            sample_id = row["sample_id"] if "sample_id" in row.index else prefix
+
+            src_ext = os.path.splitext(src_path)[1]
+            if src_ext == "":
+                src_ext = ".png"
+
+            out_name = f"{stat_name}__sample_{sanitize_filename(sample_id)}__patch_{patch_idx}{src_ext}"
+            dst_path = os.path.join(feature_dir, out_name)
+
+            shutil.copy2(src_path, dst_path)
+
+            manifest_rows.append({
+                "feature_name": feature_col,
+                "stat_name": stat_name,
+                "target_value": float(target_value),
+                "selected_value": float(row[feature_col]),
+                "abs_diff": float(abs_diff),
+                "patch_idx": patch_idx,
+                "barcode": barcode,
+                "sample_id": sample_id,
+                "source_path": src_path,
+                "saved_path": dst_path,
+                "status": "ok",
+            })
+
+    manifest_df = pd.DataFrame(manifest_rows)
+    manifest_csv = os.path.join(rep_root, "representative_manifest.csv")
+    manifest_df.to_csv(manifest_csv, index=False)
+    print(f"[INFO] Saved representative manifest: {manifest_csv}")
+    return manifest_csv
 
 
 # =========================
@@ -201,10 +398,20 @@ def process_single_sample(sample_id, config):
 
     stats_df = compute_feature_statistics(df, feature_cols)
 
+    output_dir = os.path.join(config["output_root"], f"{sample_id}_stats")
+
     if config["save_per_sample"]:
-        output_dir = os.path.join(config["output_root"], f"{sample_id}_stats")
         csv_out = save_statistics(stats_df, output_dir, sample_id)
         print(f"[INFO] Saved per-sample statistics CSV : {csv_out}")
+
+    if config.get("save_representatives", False):
+        save_representative_patches(
+            df=df,
+            feature_cols=feature_cols,
+            output_dir=output_dir,
+            config=config,
+            prefix=sample_id,
+        )
 
     return {
         "sample_id": sample_id,
@@ -245,6 +452,15 @@ def process_merged_samples(results, config):
     merged_df.to_csv(merged_csv_path, index=False)
     print(f"[INFO] Saved merged filtered feature table: {merged_csv_path}")
 
+    if config.get("save_representatives", False):
+        save_representative_patches(
+            df=merged_df,
+            feature_cols=feature_cols,
+            output_dir=output_dir,
+            config=config,
+            prefix="merged",
+        )
+
 
 # =========================
 # Args
@@ -270,6 +486,11 @@ def parse_args(args=None):
     parser.add_argument("--save_merged", type=str, default=None,
                         help="true/false")
 
+    parser.add_argument("--save_representatives", type=str, default=None,
+                        help="true/false")
+    parser.add_argument("--representative_image_col", type=str, default=None,
+                        help='Preferred image column: color_path / gray_path / mask_path')
+
     return parser.parse_args(args)
 
 
@@ -290,6 +511,7 @@ def normalize_config_types(config):
     config["drop_diagnostic"] = str_to_bool(config.get("drop_diagnostic"))
     config["save_per_sample"] = str_to_bool(config.get("save_per_sample"))
     config["save_merged"] = str_to_bool(config.get("save_merged"))
+    config["save_representatives"] = str_to_bool(config.get("save_representatives"))
 
     if config.get("status_filter") in ("None", "none", ""):
         config["status_filter"] = None
@@ -328,4 +550,3 @@ def main(args=None):
 
 if __name__ == "__main__":
     main()
-
