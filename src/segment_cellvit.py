@@ -12,6 +12,7 @@ python src/segment_cellvit.py \
   --device cuda:0
 """
 # --save_geojson_per_patch
+# --postprocess_threads 1
 
 from __future__ import annotations
 
@@ -368,37 +369,37 @@ class CellViTInferenceAdapter:
             return inst_map.astype(np.int32)
 
         # 2) nuclei_binary_map만 있으면 binary -> connected components로 임시 instance map 생성
+        print("[DEBUG] image shape:", image.shape, image.dtype, image.min(), image.max())
+
         if isinstance(out, dict) and "nuclei_binary_map" in out:
             bin_map = out["nuclei_binary_map"][0]
-
             if torch.is_tensor(bin_map):
-                bin_map = bin_map.detach().cpu().numpy()
+                arr = bin_map.detach().cpu().numpy()
+            else:
+                arr = np.asarray(bin_map)
 
-            bin_map = np.asarray(bin_map)
+            print("[DEBUG] nuclei_binary_map raw shape:", arr.shape, "min:", arr.min(), "max:", arr.max())
 
-            # shape handling
-            # 예상 케이스:
-            #   (2, H, W)  : class logits/prob
-            #   (H, W, 2)  : channel-last
-            #   (H, W)     : 이미 single map
-            if bin_map.ndim == 3:
-                if bin_map.shape[0] in (2, 3, 4):   # channel-first
-                    bin_map = np.argmax(bin_map, axis=0)
-                elif bin_map.shape[-1] in (2, 3, 4):  # channel-last
-                    bin_map = np.argmax(bin_map, axis=-1)
+            if arr.ndim == 3:
+                if arr.shape[0] in (2, 3, 4):
+                    pred = np.argmax(arr, axis=0)
+                elif arr.shape[-1] in (2, 3, 4):
+                    pred = np.argmax(arr, axis=-1)
                 else:
-                    raise RuntimeError(f"Unexpected nuclei_binary_map shape: {bin_map.shape}")
-            elif bin_map.ndim != 2:
-                raise RuntimeError(f"Unexpected nuclei_binary_map ndim: {bin_map.ndim}")
+                    raise RuntimeError(arr.shape)
+            else:
+                pred = arr
 
-            fg = (bin_map > 0).astype(np.uint8)
+            fg = (pred > 0).astype(np.uint8)
+            print("[DEBUG] fg ratio:", fg.mean())
 
-            # 임시 instance labeling
             num_labels, labels = cv2.connectedComponents(fg)
+            print("[DEBUG] connected components:", num_labels - 1)
+
             return labels.astype(np.int32)
 
         # 3) nuclei_map도 비슷하게 처리
-        if isinstance(out, dict) and "nuclei_map" in out:
+        elif isinstance(out, dict) and "nuclei_map" in out:
             inst_map = out["nuclei_map"][0]
             if torch.is_tensor(inst_map):
                 inst_map = inst_map.detach().cpu().numpy()
@@ -636,6 +637,9 @@ def _postprocess_one_patch(
                 }
             )
 
+    raw_patch_path = os.path.join(overlay_dir, f"{barcode}_idx{patch_idx}_raw.png")
+    Image.fromarray(img).save(raw_patch_path)
+
     overlay_path = None
     if overlay_dir is not None:
         overlay_path = os.path.join(overlay_dir, f"{barcode}_idx{patch_idx}.png")
@@ -798,7 +802,8 @@ def main():
     parser.add_argument("--patch_indices", type=int, nargs="*", default=None)
     parser.add_argument("--no_overlay", action="store_true")
     parser.add_argument("--save_geojson_per_patch", action="store_true")
-    parser.add_argument("--postprocess_threads", type=int, default=4)
+    # parser.add_argument("--postprocess_threads", type=int, default=4)
+    parser.add_argument("--postprocess_threads", type=int, default=1)
     args = parser.parse_args()
 
     model_path = os.path.join(args.model_dir, args.model_name)
