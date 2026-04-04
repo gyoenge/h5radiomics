@@ -3,7 +3,8 @@ Example
 -------
 cd /root/workspace/h5radiomics/src 
 python -m h5radiomics.segment_cellvit \
-  --h5_path /root/workspace/h5radiomics/h5/TENX99.h5 \
+  --sample_ids TENX99 TENX95 NCBI783 NCBI785 \
+  --input_dir /root/workspace/h5radiomics/h5 \
   --output_dir /root/workspace/h5radiomics/output_test/cellvit_patch_seg \
   --model_dir /root/workspace/h5radiomics/models \
   --model_name CellViT-SAM-H-x20.pth \
@@ -795,6 +796,7 @@ def segment_h5_patches_with_cellvit(
     save_geojson_per_patch: bool = False,
     device: str = "cuda:0",
     postprocess_threads: int = 4,
+    predictor: Optional["CellViTInferenceAdapter"] = None,
 ) -> str:
     os.makedirs(output_dir, exist_ok=True)
 
@@ -816,12 +818,13 @@ def segment_h5_patches_with_cellvit(
         pin_memory=torch.cuda.is_available(),
     )
 
-    predictor = CellViTInferenceAdapter(
-        model_path=model_path,
-        model_name=infer_cellvit_model_type(os.path.basename(model_path)),
-        output_dir=output_dir,
-        device=device,
-    )
+    if predictor is None:
+        predictor = CellViTInferenceAdapter(
+            model_path=model_path,
+            model_name=infer_cellvit_model_type(os.path.basename(model_path)),
+            output_dir=output_dir,
+            device=device,
+        )
 
     all_rows: List[Dict[str, Any]] = []
     summary_rows: List[Dict[str, Any]] = []
@@ -916,7 +919,8 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--h5_path", type=str, required=True)
+    parser.add_argument("--sample_ids", nargs="+", required=True)
+    parser.add_argument("--input_dir", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--model_dir", type=str, default="/root/workspace/models")
     parser.add_argument("--model_name", type=str, default="CellViT-SAM-H-x20.pth")
@@ -934,19 +938,47 @@ def main():
     model_path = os.path.join(args.model_dir, args.model_name)
     verify_or_download_model(model_path, args.model_name)
 
-    segment_h5_patches_with_cellvit(
-        h5_path=args.h5_path,
-        output_dir=args.output_dir,
+    predictor = CellViTInferenceAdapter(
         model_path=model_path,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        patch_indices=args.patch_indices,
-        save_png_overlay=not args.no_overlay,
-        use_class_color=not args.no_class_color,
-        save_geojson_per_patch=args.save_geojson_per_patch,
+        model_name=infer_cellvit_model_type(os.path.basename(model_path)),
+        output_dir=args.output_dir,   # 공용 runtime 폴더 용도
         device=args.device,
-        postprocess_threads=args.postprocess_threads,
     )
+
+    for sample_id in args.sample_ids:
+        h5_path = os.path.join(args.input_dir, f"{sample_id}.h5")
+
+        if not os.path.exists(h5_path):
+            print(f"[WARNING] skip {sample_id}: h5 not found -> {h5_path}")
+            continue
+
+        sample_output_dir = os.path.join(args.output_dir, f"{sample_id}_seg")
+
+        print("=" * 60)
+        print(f"[INFO] Processing sample: {sample_id}")
+        print(f"[INFO] h5_path: {h5_path}")
+        print(f"[INFO] output_dir: {sample_output_dir}")
+
+        segment_h5_patches_with_cellvit(
+            h5_path=h5_path,
+            output_dir=sample_output_dir,
+            model_path=model_path,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            patch_indices=args.patch_indices,
+            save_png_overlay=not args.no_overlay,
+            use_class_color=not args.no_class_color,
+            save_geojson_per_patch=args.save_geojson_per_patch,
+            device=args.device,
+            postprocess_threads=args.postprocess_threads,
+            predictor=predictor,
+        )
+    
+    try:
+        import ray
+        ray.shutdown()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
