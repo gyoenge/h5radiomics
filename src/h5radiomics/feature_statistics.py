@@ -479,24 +479,74 @@ def extract_feature_class(feature_name: str) -> str:
     return "unknown"
 
 
-def save_sample_feature_boxplots_by_class(df, feature_cols, output_dir, prefix):
+def zscore_features(df, feature_cols):
+    """
+    Feature-wise z-score normalization:
+      z = (x - mean) / std
+
+    std == 0 or NaN 이면 0으로 처리
+    """
+    out = df.copy()
+
+    for col in feature_cols:
+        s = pd.to_numeric(out[col], errors="coerce")
+        mean = s.mean()
+        std = s.std()
+
+        if pd.isna(std) or std == 0:
+            out[col] = 0.0
+        else:
+            out[col] = (s - mean) / std
+
+    return out
+
+
+def minmax_rescale_features(df, feature_cols):
+    """
+    Feature-wise [0,1] rescale:
+      x' = (x - min) / (max - min)
+
+    max == min or NaN 이면 0으로 처리
+    """
+    out = df.copy()
+
+    for col in feature_cols:
+        s = pd.to_numeric(out[col], errors="coerce")
+        vmin = s.min()
+        vmax = s.max()
+
+        if pd.isna(vmin) or pd.isna(vmax) or vmax == vmin:
+            out[col] = 0.0
+        else:
+            out[col] = (s - vmin) / (vmax - vmin)
+
+    return out
+
+
+def save_sample_feature_boxplots_by_class(
+    df,
+    feature_cols,
+    output_dir,
+    prefix,
+    file_tag="",
+    title_tag="raw"
+):
     """
     Save boxplot images split by feature class.
 
-    Output examples:
+    Examples:
       {output_dir}/boxplots/{prefix}_firstorder_feature_boxplot.png
-      {output_dir}/boxplots/{prefix}_glcm_feature_boxplot.png
-      ...
+      {output_dir}/boxplots/{prefix}_z-score_firstorder_feature_boxplot.png
+      {output_dir}/boxplots/{prefix}_z-score-01-rescale_firstorder_feature_boxplot.png
     """
     if len(feature_cols) == 0:
         return []
-    
+
     boxplot_dir = os.path.join(output_dir, "boxplots")
     ensure_dir(boxplot_dir)
 
     requested_stats = ["min", "q10", "q25", "q50", "q75", "q90", "max"]
 
-    # class별 grouping
     class_to_features = {}
     for col in feature_cols:
         cls = extract_feature_class(col)
@@ -563,7 +613,7 @@ def save_sample_feature_boxplots_by_class(df, feature_cols, output_dir, prefix):
             )
 
         ax.set_title(
-            f"Radiomics Feature Distribution ({feature_class})\nRepresentative patch position overlay",
+            f"Radiomics Feature Distribution ({title_tag}, {feature_class})\nRepresentative patch position overlay",
             fontsize=11
         )
         ax.set_xlabel("Feature")
@@ -576,10 +626,12 @@ def save_sample_feature_boxplots_by_class(df, feature_cols, output_dir, prefix):
 
         plt.tight_layout()
 
-        save_path = os.path.join(
-            boxplot_dir,
-            f"{prefix}_{sanitize_filename(feature_class)}_feature_boxplot.png"
-        )
+        if file_tag:
+            filename = f"{prefix}_{file_tag}_{sanitize_filename(feature_class)}_feature_boxplot.png"
+        else:
+            filename = f"{prefix}_{sanitize_filename(feature_class)}_feature_boxplot.png"
+
+        save_path = os.path.join(boxplot_dir, filename)
         plt.savefig(save_path, dpi=200, bbox_inches="tight")
         plt.close(fig)
 
@@ -644,11 +696,37 @@ def process_single_sample(sample_id, config):
             output_dir=output_dir,
             prefix=sample_id,
         )
+        
+        # 1) raw
         save_sample_feature_boxplots_by_class(
             df=df,
             feature_cols=feature_cols,
             output_dir=output_dir,
             prefix=sample_id,
+            file_tag="",
+            title_tag="raw",
+        )
+
+        # 2) z-score
+        df_z = zscore_features(df, feature_cols)
+        save_sample_feature_boxplots_by_class(
+            df=df_z,
+            feature_cols=feature_cols,
+            output_dir=output_dir,
+            prefix=sample_id,
+            file_tag="z-score",
+            title_tag="z-score",
+        )
+
+        # 3) z-score -> [0,1] rescale
+        df_z01 = minmax_rescale_features(df_z, feature_cols)
+        save_sample_feature_boxplots_by_class(
+            df=df_z01,
+            feature_cols=feature_cols,
+            output_dir=output_dir,
+            prefix=sample_id,
+            file_tag="z-score-01-rescale",
+            title_tag="z-score -> [0,1] rescale",
         )
 
     return {
