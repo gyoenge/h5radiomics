@@ -13,7 +13,7 @@ python -m h5radiomics.extract_radiomics \
 python -m h5radiomics.extract_radiomics \
   --sample_ids TENX99 TENX95 NCBI785 NCBI783 \
   --h5_dir /root/workspace/h5radiomics/h5 \
-  --output_root /root/workspace/h5radiomics/output_test \
+  --output_root /root/workspace/h5radiomics/outputs \
   --label 255 \
   --save_patches \
   --classes firstorder glcm glrlm glszm gldm ngtdm \

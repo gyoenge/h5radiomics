@@ -4,7 +4,7 @@ sample_ids:
   - NCBI783
   - TENX99
 
-input_root: /root/workspace/impl/h5radiomics/output
+input_root: /root/workspace/impl/h5radiomics/outputs
 output_root: /root/workspace/impl/h5radiomics/statistics
 
 status_filter: ok

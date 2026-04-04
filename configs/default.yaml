@@ -7,7 +7,7 @@ sample_ids:
   - NCBI783 # 3869 patches -> 3005 patches
 
 h5_dir: /root/workspace/h5radiomics/h5
-output_root: /root/workspace/h5radiomics/output_test
+output_root: /root/workspace/h5radiomics/outputs
 label: 255
 save_patches: false # true
 

@@ -218,6 +218,10 @@ h5/*
 output_test/
 output_test/*
 
+# output files
+outputs/
+outputs/* 
+
 # model files
 models/
 models/*

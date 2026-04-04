@@ -11,8 +11,8 @@ python -m h5radiomics.feature_statistics --config ../configs/stats.yaml
 (ii) Using command-line arguments:
 python -m h5radiomics.feature_statistics \
   --sample_ids TENX95 NCBI785 NCBI783 TENX99 \
-  --input_root /root/workspace/h5radiomics/output_test \
-  --output_root /root/workspace/h5radiomics/output_test/statistics \
+  --input_root /root/workspace/h5radiomics/outputs \
+  --output_root /root/workspace/h5radiomics/outputs/statistics \
   --status_filter ok \
   --save_representatives true \
   --save_boxplot true
