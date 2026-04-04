@@ -12,6 +12,7 @@ python -m h5radiomics.segment_cellvit \
   --num_workers 0 \
   --device cuda:0
 """
+# --no_class_color
 # --save_geojson_per_patch
 # --postprocess_threads 1
 
@@ -640,6 +641,7 @@ def save_overlay_png(
     gdf: gpd.GeoDataFrame,
     save_path: str,
     title: Optional[str] = None,
+    use_class_color: bool = True,  
 ):
     img = ensure_uint8_rgb(img)
 
@@ -657,33 +659,51 @@ def save_overlay_png(
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.imshow(img)
 
-    # class별로 polygon 그림
-    if len(gdf) > 0:
-        for cls_name, sub_gdf in gdf.groupby("class_name"):
-            color = CLASS_COLOR_MAP.get(str(cls_name).lower(), DEFAULT_COLOR)
+    if use_class_color:
+        # class별로 polygon 그림
+        if len(gdf) > 0:
+            for cls_name, sub_gdf in gdf.groupby("class_name"):
+                color = CLASS_COLOR_MAP.get(str(cls_name).lower(), DEFAULT_COLOR)
 
-            patches = []
-            for geom in sub_gdf.geometry:
-                for poly in iter_polygons(geom):
-                    xy = np.asarray(poly.exterior.coords)
-                    if len(xy) >= 3:
-                        patches.append(MplPolygon(xy, closed=True))
+                patches = []
+                for geom in sub_gdf.geometry:
+                    for poly in iter_polygons(geom):
+                        xy = np.asarray(poly.exterior.coords)
+                        if len(xy) >= 3:
+                            patches.append(MplPolygon(xy, closed=True))
 
-            if patches:
-                collection = PatchCollection(
-                    patches,
-                    facecolor="none",
-                    edgecolor=color,
-                    linewidth=1.0,
-                )
-                ax.add_collection(collection)
+                if patches:
+                    collection = PatchCollection(
+                        patches,
+                        facecolor="none",
+                        edgecolor=color,
+                        linewidth=1.0,
+                    )
+                    ax.add_collection(collection)
+    else:
+        # 단일 색 (기존 방식)
+        patches = []
+        for geom in gdf.geometry:
+            for poly in iter_polygons(geom):
+                xy = np.asarray(poly.exterior.coords)
+                if len(xy) >= 3:
+                    patches.append(MplPolygon(xy, closed=True))
+
+        if patches:
+            ax.add_collection(PatchCollection(
+                patches,
+                facecolor="none",
+                edgecolor="lime",
+                linewidth=1.0,
+            ))
 
     # legend는 loop 밖에서
-    handles = [
-        Line2D([0], [0], color=color, lw=2, label=cls)
-        for cls, color in CLASS_COLOR_MAP.items()
-    ]
-    ax.legend(handles=handles, loc="lower left", fontsize=8)
+    if use_class_color:
+        handles = [
+            Line2D([0], [0], color=color, lw=2, label=cls)
+            for cls, color in CLASS_COLOR_MAP.items()
+        ]
+        ax.legend(handles=handles, loc="lower left", fontsize=8)
 
     if title:
         ax.set_title(title)
@@ -705,6 +725,7 @@ def _postprocess_one_patch(
     coord: Optional[np.ndarray],
     overlay_dir: Optional[str],
     geojson_dir: Optional[str],
+    use_class_color: bool,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     rows = []
 
@@ -737,6 +758,7 @@ def _postprocess_one_patch(
             gdf=gdf,
             save_path=overlay_path,
             title=f"idx={patch_idx}, bc={barcode}, cells={len(gdf)}",
+            use_class_color=use_class_color,
         )
 
     geojson_path = None
@@ -769,6 +791,7 @@ def segment_h5_patches_with_cellvit(
     num_workers: int = 0,
     patch_indices: Optional[List[int]] = None,
     save_png_overlay: bool = True,
+    use_class_color: bool = True,
     save_geojson_per_patch: bool = False,
     device: str = "cuda:0",
     postprocess_threads: int = 4,
@@ -835,6 +858,7 @@ def segment_h5_patches_with_cellvit(
                         coord,
                         overlay_dir,
                         geojson_dir,
+                        use_class_color,  
                     )
                 )
 
@@ -901,6 +925,7 @@ def main():
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--patch_indices", type=int, nargs="*", default=None)
     parser.add_argument("--no_overlay", action="store_true")
+    parser.add_argument("--no_class_color", action="store_true")
     parser.add_argument("--save_geojson_per_patch", action="store_true")
     # parser.add_argument("--postprocess_threads", type=int, default=4)
     parser.add_argument("--postprocess_threads", type=int, default=1)
@@ -917,6 +942,7 @@ def main():
         num_workers=args.num_workers,
         patch_indices=args.patch_indices,
         save_png_overlay=not args.no_overlay,
+        use_class_color=not args.no_class_color,
         save_geojson_per_patch=args.save_geojson_per_patch,
         device=args.device,
         postprocess_threads=args.postprocess_threads,
