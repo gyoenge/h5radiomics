@@ -1,0 +1,331 @@
+# feature_statistics.py
+"""
+Saved radiomics feature CSV files -> feature-wise statistics
+
+Example usage:
+
+(i) Using YAML config file:
+cd /root/workspace/h5radiomics/src
+python -m h5radiomics.feature_statistics --config ../configs/stats.yaml
+
+(ii) Using command-line arguments:
+python -m h5radiomics.feature_statistics \
+  --sample_ids TENX95 NCBI785 NCBI783 TENX99 \
+  --input_root /root/workspace/h5radiomics/output_test \
+  --output_root /root/workspace/h5radiomics/output_test/statistics \
+  --status_filter ok
+"""
+
+import os
+import argparse
+import yaml
+import numpy as np
+import pandas as pd
+
+
+# =========================
+# Config
+# =========================
+
+def get_default_config():
+    return {
+        "sample_ids": ["TENX95", "NCBI785", "NCBI783", "TENX99"],
+        "input_root": "/root/workspace/impl/h5radiomics/output",
+        "output_root": "/root/workspace/impl/h5radiomics/statistics",
+        "status_filter": "ok",  # None or "ok"
+        "drop_diagnostic": True,
+        "save_per_sample": True,
+        "save_merged": True,
+    }
+
+
+def load_yaml_config(config_path):
+    with open(config_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"YAML config must be a mapping/dict, got: {type(data)}")
+    return data
+
+
+def merge_config(defaults, yaml_config, cli_args):
+    config = defaults.copy()
+
+    if yaml_config:
+        for k, v in yaml_config.items():
+            if v is not None:
+                config[k] = v
+
+    for k, v in vars(cli_args).items():
+        if k == "config":
+            continue
+        if v is not None:
+            config[k] = v
+
+    return config
+
+
+# =========================
+# Utils
+# =========================
+
+def find_feature_csv(input_root, sample_id):
+    """
+    Expected path:
+      {input_root}/{sample_id}_outputs/{sample_id}_radiomics_features.csv
+    """
+    csv_path = os.path.join(
+        input_root,
+        f"{sample_id}_outputs",
+        f"{sample_id}_radiomics_features.csv"
+    )
+    return csv_path
+
+
+def load_feature_csv(csv_path, status_filter="ok"):
+    df = pd.read_csv(csv_path)
+
+    if status_filter is not None and "status" in df.columns:
+        df = df[df["status"] == status_filter].copy()
+
+    return df
+
+
+def get_feature_columns(df, drop_diagnostic=True):
+    """
+    Select only numeric radiomics feature columns.
+    Exclude metadata columns and optionally exclude diagnostic columns.
+    """
+    meta_cols = {
+        "patch_idx", "barcode", "color_path", "gray_path", "mask_path",
+        "x", "y", "status"
+    }
+
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+    feature_cols = [c for c in numeric_cols if c not in meta_cols]
+
+    if drop_diagnostic:
+        feature_cols = [c for c in feature_cols if not c.startswith("diagnostics_")]
+
+    return feature_cols
+
+
+def compute_feature_statistics(df, feature_cols):
+    """
+    Compute feature-wise statistics.
+    Output: rows=feature_name, columns=statistics
+    """
+    rows = []
+
+    for col in feature_cols:
+        s = pd.to_numeric(df[col], errors="coerce")
+
+        row = {
+            "feature_name": col,
+            "count": int(s.count()),
+            "nan_count": int(s.isna().sum()),
+            "mean": s.mean(),
+            "std": s.std(),
+            "min": s.min(),
+            "q01": s.quantile(0.01),
+            "q05": s.quantile(0.05),
+            "q25": s.quantile(0.25),
+            "median": s.median(),
+            "q75": s.quantile(0.75),
+            "q95": s.quantile(0.95),
+            "q99": s.quantile(0.99),
+            "max": s.max(),
+            "iqr": s.quantile(0.75) - s.quantile(0.25),
+            "abs_mean": s.abs().mean(),
+            "zero_count": int((s == 0).sum()),
+            "positive_count": int((s > 0).sum()),
+            "negative_count": int((s < 0).sum()),
+        }
+        rows.append(row)
+
+    stats_df = pd.DataFrame(rows)
+    stats_df = stats_df.sort_values("feature_name").reset_index(drop=True)
+    return stats_df
+
+
+def summarize_dataset(df, feature_cols):
+    summary = {
+        "num_rows": len(df),
+        "num_feature_columns": len(feature_cols),
+        "num_total_columns": len(df.columns),
+    }
+    return summary
+
+
+def save_statistics(stats_df, output_dir, prefix):
+    os.makedirs(output_dir, exist_ok=True)
+
+    csv_path = os.path.join(output_dir, f"{prefix}_feature_statistics.csv")
+    stats_df.to_csv(csv_path, index=False)
+
+    return csv_path
+
+
+# =========================
+# Main logic
+# =========================
+
+def process_single_sample(sample_id, config):
+    csv_path = find_feature_csv(config["input_root"], sample_id)
+
+    if not os.path.exists(csv_path):
+        print(f"[error] CSV not found for sample {sample_id}: {csv_path}")
+        return None
+
+    print(f"[INFO] Loading sample: {sample_id}")
+    print(f"[INFO] CSV path: {csv_path}")
+
+    df = load_feature_csv(
+        csv_path=csv_path,
+        status_filter=config["status_filter"],
+    )
+
+    feature_cols = get_feature_columns(
+        df=df,
+        drop_diagnostic=config["drop_diagnostic"],
+    )
+
+    summary = summarize_dataset(df, feature_cols)
+    print(f"[INFO] sample={sample_id}, rows={summary['num_rows']}, features={summary['num_feature_columns']}")
+
+    if len(feature_cols) == 0:
+        print(f"[warning] No feature columns found for sample {sample_id}")
+        return None
+
+    stats_df = compute_feature_statistics(df, feature_cols)
+
+    if config["save_per_sample"]:
+        output_dir = os.path.join(config["output_root"], f"{sample_id}_stats")
+        csv_out = save_statistics(stats_df, output_dir, sample_id)
+        print(f"[INFO] Saved per-sample statistics CSV : {csv_out}")
+
+    return {
+        "sample_id": sample_id,
+        "df": df,
+        "feature_cols": feature_cols,
+        "stats_df": stats_df,
+    }
+
+
+def process_merged_samples(results, config):
+    valid_results = [r for r in results if r is not None]
+    if len(valid_results) == 0:
+        print("[warning] No valid sample results to merge.")
+        return
+
+    merged_df_list = []
+    for r in valid_results:
+        temp = r["df"].copy()
+        temp["sample_id"] = r["sample_id"]
+        merged_df_list.append(temp)
+
+    merged_df = pd.concat(merged_df_list, axis=0, ignore_index=True)
+
+    feature_cols = get_feature_columns(
+        df=merged_df,
+        drop_diagnostic=config["drop_diagnostic"],
+    )
+
+    print(f"[INFO] Merged rows={len(merged_df)}, features={len(feature_cols)}")
+
+    merged_stats_df = compute_feature_statistics(merged_df, feature_cols)
+
+    output_dir = os.path.join(config["output_root"], "merged_stats")
+    csv_out = save_statistics(merged_stats_df, output_dir, "merged")
+    print(f"[INFO] Saved merged statistics CSV : {csv_out}")
+
+    merged_csv_path = os.path.join(output_dir, "merged_filtered_features.csv")
+    merged_df.to_csv(merged_csv_path, index=False)
+    print(f"[INFO] Saved merged filtered feature table: {merged_csv_path}")
+
+
+# =========================
+# Args
+# =========================
+
+def parse_args(args=None):
+    parser = argparse.ArgumentParser(description="Analyze saved radiomics feature CSV files.")
+
+    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file")
+
+    parser.add_argument("--sample_ids", nargs="+", type=str, default=None)
+    parser.add_argument("--input_root", type=str, default=None)
+    parser.add_argument("--output_root", type=str, default=None)
+
+    parser.add_argument("--status_filter", type=str, default=None,
+                        help='Filter rows by status, e.g. "ok". Use None to disable filtering.')
+
+    parser.add_argument("--drop_diagnostic", type=str, default=None,
+                        help='true/false. Exclude columns starting with "diagnostics_"')
+
+    parser.add_argument("--save_per_sample", type=str, default=None,
+                        help="true/false")
+    parser.add_argument("--save_merged", type=str, default=None,
+                        help="true/false")
+
+    return parser.parse_args(args)
+
+
+def str_to_bool(v):
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    v = str(v).strip().lower()
+    if v in ("true", "1", "yes", "y"):
+        return True
+    if v in ("false", "0", "no", "n"):
+        return False
+    raise ValueError(f"Cannot parse boolean value from: {v}")
+
+
+def normalize_config_types(config):
+    config["drop_diagnostic"] = str_to_bool(config.get("drop_diagnostic"))
+    config["save_per_sample"] = str_to_bool(config.get("save_per_sample"))
+    config["save_merged"] = str_to_bool(config.get("save_merged"))
+
+    if config.get("status_filter") in ("None", "none", ""):
+        config["status_filter"] = None
+
+    return config
+
+
+# =========================
+# Entry point
+# =========================
+
+def main(args=None):
+    cli_args = parse_args(args)
+
+    defaults = get_default_config()
+    yaml_config = load_yaml_config(cli_args.config) if cli_args.config else {}
+    config = merge_config(defaults, yaml_config, cli_args)
+    config = normalize_config_types(config)
+
+    print("Configuration:")
+    for k, v in config.items():
+        print(f"  {k}: {v}")
+
+    os.makedirs(config["output_root"], exist_ok=True)
+
+    results = []
+    for sample_id in config["sample_ids"]:
+        result = process_single_sample(sample_id, config)
+        results.append(result)
+
+    if config["save_merged"]:
+        process_merged_samples(results, config)
+
+    print("[INFO] Done.")
+
+
+if __name__ == "__main__":
+    main()
+
