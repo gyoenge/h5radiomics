@@ -637,8 +637,8 @@ def _postprocess_one_patch(
                 }
             )
 
-    raw_patch_path = os.path.join(overlay_dir, f"{barcode}_idx{patch_idx}_raw.png")
-    Image.fromarray(img).save(raw_patch_path)
+    # raw_patch_path = os.path.join(overlay_dir, f"{barcode}_idx{patch_idx}_raw.png")
+    # Image.fromarray(img).save(raw_patch_path)
 
     overlay_path = None
     if overlay_dir is not None:
