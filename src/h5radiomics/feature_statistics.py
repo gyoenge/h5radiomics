@@ -374,7 +374,7 @@ def save_sample_feature_boxplot(df, feature_cols, output_dir, prefix):
     Save one combined boxplot image per sample.
 
     Output:
-      {output_dir}/{prefix}_feature_boxplot.png
+      {output_dir}/boxplots/{prefix}_feature_boxplot.png
 
     X-axis: feature names
     Y-axis: feature value distribution
@@ -383,6 +383,9 @@ def save_sample_feature_boxplot(df, feature_cols, output_dir, prefix):
     """
     if len(feature_cols) == 0:
         return None
+
+    boxplot_dir = os.path.join(output_dir, "boxplots")
+    ensure_dir(boxplot_dir)
 
     requested_stats = ["min", "q10", "q25", "q50", "q75", "q90", "max"]
 
@@ -455,12 +458,135 @@ def save_sample_feature_boxplot(df, feature_cols, output_dir, prefix):
 
     plt.tight_layout()
 
-    save_path = os.path.join(output_dir, f"{prefix}_feature_boxplot.png")
+    save_path = os.path.join(boxplot_dir, f"{prefix}_feature_boxplot.png")
     plt.savefig(save_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
 
     print(f"[INFO] Saved sample feature boxplot: {save_path}")
     return save_path
+
+
+def extract_feature_class(feature_name: str) -> str:
+    """
+    Examples:
+      original_firstorder_Mean -> firstorder
+      wavelet-HHH_glcm_Contrast -> glcm
+      log-sigma-3-0-mm-3D_glszm_ZoneEntropy -> glszm
+    """
+    parts = str(feature_name).split("_")
+    if len(parts) >= 2:
+        return parts[1].lower()
+    return "unknown"
+
+
+def save_sample_feature_boxplots_by_class(df, feature_cols, output_dir, prefix):
+    """
+    Save boxplot images split by feature class.
+
+    Output examples:
+      {output_dir}/boxplots/{prefix}_firstorder_feature_boxplot.png
+      {output_dir}/boxplots/{prefix}_glcm_feature_boxplot.png
+      ...
+    """
+    if len(feature_cols) == 0:
+        return []
+    
+    boxplot_dir = os.path.join(output_dir, "boxplots")
+    ensure_dir(boxplot_dir)
+
+    requested_stats = ["min", "q10", "q25", "q50", "q75", "q90", "max"]
+
+    # class별 grouping
+    class_to_features = {}
+    for col in feature_cols:
+        cls = extract_feature_class(col)
+        class_to_features.setdefault(cls, []).append(col)
+
+    saved_paths = []
+
+    for feature_class, class_features in sorted(class_to_features.items()):
+        data_for_boxplot = []
+        scatter_x = []
+        scatter_y = []
+
+        for i, feature_col in enumerate(class_features, start=1):
+            s = pd.to_numeric(df[feature_col], errors="coerce").dropna()
+            if len(s) == 0:
+                data_for_boxplot.append(np.array([np.nan]))
+                continue
+
+            data_for_boxplot.append(s.values)
+
+            stat_targets = get_target_stat_values(df[feature_col])
+            if stat_targets is None:
+                continue
+
+            for stat_name in requested_stats:
+                target_value = stat_targets[stat_name]
+                row, _ = select_representative_row(
+                    df=df,
+                    feature_col=feature_col,
+                    target_value=target_value,
+                    stat_name=stat_name,
+                )
+                if row is None:
+                    continue
+
+                actual_value = pd.to_numeric(row[feature_col], errors="coerce")
+                if pd.isna(actual_value):
+                    continue
+
+                scatter_x.append(i)
+                scatter_y.append(float(actual_value))
+
+        if len(data_for_boxplot) == 0:
+            continue
+
+        fig_width = max(12, len(class_features) * 0.35)
+        fig_height = 6
+
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
+        ax.boxplot(
+            data_for_boxplot,
+            showfliers=False,
+            patch_artist=False,
+            widths=0.5,
+        )
+
+        if len(scatter_x) > 0:
+            ax.scatter(
+                scatter_x,
+                scatter_y,
+                s=10,
+                alpha=0.9,
+            )
+
+        ax.set_title(
+            f"Radiomics Feature Distribution ({feature_class})\nRepresentative patch position overlay",
+            fontsize=11
+        )
+        ax.set_xlabel("Feature")
+        ax.set_ylabel("Feature value")
+
+        ax.set_xticks(range(1, len(class_features) + 1))
+        ax.set_xticklabels(class_features, rotation=90, fontsize=7)
+
+        ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+        plt.tight_layout()
+
+        save_path = os.path.join(
+            boxplot_dir,
+            f"{prefix}_{sanitize_filename(feature_class)}_feature_boxplot.png"
+        )
+        plt.savefig(save_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+        print(f"[INFO] Saved class boxplot: {save_path}")
+        saved_paths.append(save_path)
+
+    return saved_paths
 
 
 # =========================
@@ -513,6 +639,12 @@ def process_single_sample(sample_id, config):
 
     if config.get("save_boxplot", False):
         save_sample_feature_boxplot(
+            df=df,
+            feature_cols=feature_cols,
+            output_dir=output_dir,
+            prefix=sample_id,
+        )
+        save_sample_feature_boxplots_by_class(
             df=df,
             feature_cols=feature_cols,
             output_dir=output_dir,
