@@ -5,18 +5,22 @@ Example usage:
 
 (i) Using YAML config file:
 cd /root/workspace/h5radiomics/src 
-python -m h5radiomics.extract_radiomics --config ../configs/default.yaml
+python -m h5radiomics.extract_radiomics \
+  --config ../configs/default.yaml \
+  --num_workers 8
 
 (ii) Using command-line arguments to override defaults or YAML config: 
 python -m h5radiomics.extract_radiomics \
-  --sample_ids TENX95 NCBI785 NCBI783 \
-  --h5_dir /root/workspace/hest_data/eval/bench_data/IDC/patches \
-  --output_root /root/workspace/impl/h5radiomics/output_test \
+  --sample_ids TENX99 TENX95 NCBI785 NCBI783 \
+  --h5_dir /root/workspace/h5radiomics/h5 \
+  --output_root /root/workspace/h5radiomics/output_test \
   --label 255 \
   --save_patches \
   --classes firstorder glcm glrlm glszm gldm ngtdm \
-  --filters Original Wavelet LoG Square SquareRoot Logarithm Exponential
+  --filters Original \
+  --num_workers 8 
 """ 
+# --filters Original Wavelet LoG Square SquareRoot Logarithm Exponential 
 
 import os 
 import argparse
@@ -26,8 +30,12 @@ import numpy as np
 import pandas as pd
 import SimpleITK as sitk
 
+import math
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
 from radiomics import featureextractor
 from PIL import Image
+from tqdm import tqdm
 
 from h5radiomics.utils import (
     get_img_key,
@@ -47,11 +55,12 @@ def get_default_config():
     return {
         "sample_ids": ["TENX95", "NCBI785", "NCBI783", "TENX99"],
         "h5_dir": "/root/workspace/hest_data/eval/bench_data/IDC/patches",
-        "output_root": "/root/workspace/impl/h5radiomics/output",
+        "output_root": "/root/workspace/h5radiomics/outputs",
         "label": 255,
         "save_patches": False,
         "classes": ["firstorder", "glcm", "glrlm", "glszm", "gldm", "ngtdm"],
         "filters": ["Original"],
+        "num_workers": 0,
     }
 
 
@@ -137,126 +146,260 @@ def build_radiomics_extractor(classes=None, filters=None, label=255):
 
     return extractor
 
+def process_single_patch(
+    f,
+    img_key,
+    coords_key,
+    barcodes_key,
+    i,
+    output_root,
+    extractor,
+    label=255,
+    save_patches=True,
+):
+    img = f[img_key][i]
 
-def extract_radiomics(
-        h5_path, 
-        output_root, 
-        extractor, 
-        label=255,
-        save_patches=True, # Whether to save extracted patches as images. 
-    ): 
-    rows = []  # To store metadata and radiomics features for each patch
+    if img.ndim == 3 and img.shape[2] == 3:
+        color_patch = img.astype(np.uint8)
+    elif img.ndim == 3 and img.shape[0] == 3:
+        color_patch = np.transpose(img, (1, 2, 0)).astype(np.uint8)
+    else:
+        raise ValueError(f"Unexpected image shape: {img.shape} for patch index {i}")
+
+    gray_patch = np.array(Image.fromarray(color_patch).convert("L"))
+
+    mask_patch = (gray_patch < 220).astype(np.uint8)
+    mask_patch = (mask_patch * label).astype(np.uint8)
+
+    coords = f[coords_key][i] if coords_key else None
+    barcode = f[barcodes_key][i] if barcodes_key else None
+    barcode = to_str_barcode(barcode) if barcode is not None else None
+
+    base_filename = make_base_name(i, barcode)
+
+    color_path = ""
+    gray_path = ""
+    mask_path = ""
+
+    if save_patches:
+        color_dir = os.path.join(output_root, "patches_color")
+        gray_dir = os.path.join(output_root, "patches_gray")
+        mask_dir = os.path.join(output_root, "patches_mask")
+        os.makedirs(color_dir, exist_ok=True)
+        os.makedirs(gray_dir, exist_ok=True)
+        os.makedirs(mask_dir, exist_ok=True)
+
+        color_path = os.path.join(color_dir, f"{base_filename}.png")
+        gray_path = os.path.join(gray_dir, f"{base_filename}.png")
+        mask_path = os.path.join(mask_dir, f"{base_filename}.png")
+
+        Image.fromarray(color_patch).save(color_path)
+        Image.fromarray(gray_patch).save(gray_path)
+        Image.fromarray(mask_patch).save(mask_path)
+
+    if np.count_nonzero(mask_patch) < 50:
+        return {
+            "patch_idx": i,
+            "barcode": barcode,
+            "color_path": color_path,
+            "gray_path": gray_path,
+            "mask_path": "",
+            "x": coords[0] if coords is not None else None,
+            "y": coords[1] if coords is not None else None,
+            "status": "skipped_small_mask",
+        }
+
+    try:
+        image_sitk = sitk.GetImageFromArray(gray_patch)
+        mask_sitk = sitk.GetImageFromArray(mask_patch)
+
+        features = extractor.execute(image_sitk, mask_sitk)
+
+        row = {
+            "patch_idx": i,
+            "barcode": barcode,
+            "color_path": color_path,
+            "gray_path": gray_path,
+            "mask_path": mask_path,
+            "x": coords[0] if coords is not None else None,
+            "y": coords[1] if coords is not None else None,
+            "status": "ok",
+        }
+        row.update(features)
+        return row
+
+    except Exception as e:
+        return {
+            "patch_idx": i,
+            "barcode": barcode,
+            "color_path": color_path,
+            "gray_path": gray_path,
+            "mask_path": mask_path,
+            "x": coords[0] if coords is not None else None,
+            "y": coords[1] if coords is not None else None,
+            "status": f"error: {str(e)}",
+        }
+
+
+def process_patch_chunk(
+    h5_path,
+    patch_indices,
+    output_root,
+    classes,
+    filters,
+    label,
+    save_patches,
+):
+    rows = []
+
+    extractor = build_radiomics_extractor(
+        classes=classes,
+        filters=filters,
+        label=label,
+    )
 
     with h5py.File(h5_path, "r") as f:
         img_key = get_img_key(f)
         coords_key = get_coords_key(f)
         barcodes_key = get_barcodes_key(f)
 
-        total_num_patches = len(f[img_key])
-        
-        for i in range(total_num_patches):
-            # Extract patch data 
-            img = f[img_key][i]  
-
-            if img.ndim == 3 and img.shape[2] == 3:
-                # Already in (H, W, C) format 
-                color_patch = img.astype(np.uint8)
-            elif img.ndim == 3 and img.shape[0] == 3:
-                # Transpose from (C, H, W) to (H, W, C)
-                color_patch = np.transpose(img, (1, 2, 0)).astype(np.uint8)
-            else:
-                raise ValueError(f"Unexpected image shape: {img.shape} for patch index {i}")
-
-            # Create grayscale patches
-            gray_patch = np.array(Image.fromarray(color_patch).convert("L"))
-
-            # Create mask patches
-            # mask_patch = np.where(gray_patch > 0, 255, 0).astype(np.uint8)
-            mask_patch = (gray_patch < 220).astype(np.uint8)  # return binary mask (0 or 1) instead of 0 or 255 
-            mask_patch = (mask_patch * label).astype(np.uint8)  # Scale binary mask to the specified label value (e.g., 255)
-
-            # Extract associated metadata if available
-            coords = f[coords_key][i] if coords_key else None
-            barcode = f[barcodes_key][i] if barcodes_key else None
-            barcode = to_str_barcode(barcode) if barcode is not None else None
-
-            # Make base filename for saving patches 
-            base_filename = make_base_name(i, barcode)
-
-            # Save patches as images 
-            color_path = ""
-            gray_path = ""
-            mask_path = ""
-            if save_patches:
-                color_dir = os.path.join(output_root, "patches_color")
-                gray_dir = os.path.join(output_root, "patches_gray")
-                mask_dir = os.path.join(output_root, "patches_mask")
-                os.makedirs(color_dir, exist_ok=True)
-                os.makedirs(gray_dir, exist_ok=True)
-                os.makedirs(mask_dir, exist_ok=True)
-                color_path = os.path.join(color_dir, f"{base_filename}.png")
-                gray_path = os.path.join(gray_dir, f"{base_filename}.png")
-                mask_path = os.path.join(mask_dir, f"{base_filename}.png")
-                Image.fromarray(color_patch).save(color_path)
-                Image.fromarray(gray_patch).save(gray_path)
-                Image.fromarray(mask_patch).save(mask_path)
-
-            # Skip when mask is too small (e.g., less than 10% foreground) to avoid meaningless radiomics features
-            if np.count_nonzero(mask_patch) < 50:
-                print(f"[skip] patch {i}: foreground too small")
-                row = {
-                    "patch_idx": i,
-                    "barcode": barcode,
-                    "color_path": color_path,
-                    "gray_path": gray_path,
-                    "mask_path": "",
-                    "x": coords[0] if coords is not None else None,
-                    "y": coords[1] if coords is not None else None,
-                    "status": "skipped_small_mask",
-                }
+        for i in patch_indices:
+            try:
+                row = process_single_patch(
+                    f=f,
+                    img_key=img_key,
+                    coords_key=coords_key,
+                    barcodes_key=barcodes_key,
+                    i=i,
+                    output_root=output_root,
+                    extractor=extractor,
+                    label=label,
+                    save_patches=save_patches,
+                )
                 rows.append(row)
-                continue
-
-            # Extract radiomics features using pyradiomics
-            try: 
-                image_sitk = sitk.GetImageFromArray(gray_patch)
-                mask_sitk = sitk.GetImageFromArray(mask_patch)
-
-                features = extractor.execute(image_sitk, mask_sitk)
-                # features_original = {k: v for k, v in features.items() if k.startswith("original")}  # Keep only original features
-
-                row = {
-                    "patch_idx": i,
-                    "barcode": barcode,
-                    "color_path": color_path,
-                    "gray_path": gray_path,
-                    "mask_path": mask_path,
-                    "x": coords[0] if coords is not None else None,
-                    "y": coords[1] if coords is not None else None,
-                    "status": "ok",
-                    # **features_original,  # Add radiomics features to the row
-                }
-                row.update(features)  # Add all features (including non-original) to the row
-                rows.append(row)
-            
             except Exception as e:
-                print(f"[error] patch {i}: {e}")
-                row = {
+                rows.append({
                     "patch_idx": i,
-                    "barcode": barcode,
-                    "color_path": color_path,
-                    "gray_path": gray_path,
-                    "mask_path": mask_path,
-                    "x": coords[0] if coords is not None else None,
-                    "y": coords[1] if coords is not None else None,
+                    "barcode": None,
+                    "color_path": "",
+                    "gray_path": "",
+                    "mask_path": "",
+                    "x": None,
+                    "y": None,
                     "status": f"error: {str(e)}",
-                }
-                rows.append(row)
+                })
+
+    return rows
+
+
+def split_indices(indices, num_chunks):
+    chunk_size = math.ceil(len(indices) / num_chunks)
+    return [
+        indices[i:i + chunk_size]
+        for i in range(0, len(indices), chunk_size)
+    ]
+
+
+def extract_radiomics(
+    h5_path,
+    output_root,
+    extractor=None,
+    label=255,
+    save_patches=True,
+    num_workers=0,
+    classes=None,
+    filters=None,
+):
+    with h5py.File(h5_path, "r") as f:
+        img_key = get_img_key(f)
+        total_num_patches = len(f[img_key])
+
+    patch_indices = list(range(total_num_patches))
+
+    # single-process
+    if num_workers is None or num_workers <= 1:
+        rows = []
+        if extractor is None:
+            extractor = build_radiomics_extractor(
+                classes=classes,
+                filters=filters,
+                label=label,
+            )
+
+        with h5py.File(h5_path, "r") as f:
+            img_key = get_img_key(f)
+            coords_key = get_coords_key(f)
+            barcodes_key = get_barcodes_key(f)
+
+            for i in tqdm(patch_indices, desc="[Processing patches]"):
+                try:
+                    row = process_single_patch(
+                        f=f,
+                        img_key=img_key,
+                        coords_key=coords_key,
+                        barcodes_key=barcodes_key,
+                        i=i,
+                        output_root=output_root,
+                        extractor=extractor,
+                        label=label,
+                        save_patches=save_patches,
+                    )
+                    rows.append(row)
+                except Exception as e:
+                    rows.append({
+                        "patch_idx": i,
+                        "barcode": None,
+                        "color_path": "",
+                        "gray_path": "",
+                        "mask_path": "",
+                        "x": None,
+                        "y": None,
+                        "status": f"error: {str(e)}",
+                    })
 
         return {
-            "total_num_patches": total_num_patches, 
-            "rows": rows, 
+            "total_num_patches": total_num_patches,
+            "rows": rows,
         }
+
+    # multi-process
+    num_workers = min(num_workers, os.cpu_count() or 1)
+    
+    chunks = split_indices(patch_indices, num_workers * 64) # chunk를 더 잘게 쪼개면 progress bar가 더 자연스럽게 움직임
+    rows = []
+
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        future_to_chunk_size = {}
+
+        for chunk in chunks:
+            future = executor.submit(
+                process_patch_chunk,
+                h5_path,
+                chunk,
+                output_root,
+                classes,
+                filters,
+                label,
+                save_patches,
+            )
+            future_to_chunk_size[future] = len(chunk)
+
+        with tqdm(total=len(chunks), desc="[Processing chunks]", position=0) as chunk_pbar, \
+            tqdm(total=total_num_patches, desc="[Processing patches]", position=1) as patch_pbar:
+
+            for future in as_completed(future_to_chunk_size):
+                chunk_rows = future.result()
+                rows.extend(chunk_rows)
+
+                chunk_pbar.update(1)
+                patch_pbar.update(future_to_chunk_size[future])
+
+    rows.sort(key=lambda x: x["patch_idx"])
+
+    return {
+        "total_num_patches": total_num_patches,
+        "rows": rows,
+    }
 
 
 def parse_args(args=None):
@@ -273,6 +416,13 @@ def parse_args(args=None):
 
     parser.add_argument("--save_patches", action="store_true")
     parser.add_argument("--no_save_patches", action="store_true")
+
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=0,
+        help="Number of worker processes for multiprocessing. 0 or 1 means single-process.",
+    )
 
     return parser.parse_args(args)
     
@@ -317,11 +467,14 @@ def main(args=None):
 
         # Extract radiomics features 
         result = extract_radiomics(
-            h5_path=h5_path, 
-            output_root=output_root, 
-            extractor=extractor, 
-            label=config["label"], 
-            save_patches=config["save_patches"], 
+            h5_path=h5_path,
+            output_root=output_root,
+            extractor=extractor if config["num_workers"] <= 1 else None,
+            label=config["label"],
+            save_patches=config["save_patches"],
+            num_workers=config["num_workers"],
+            classes=config["classes"],
+            filters=config["filters"],
         )
 
         # Save results to a CSV file
