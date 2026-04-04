@@ -449,7 +449,8 @@ def main(args=None):
     # Process each sample ID 
     for sample in config["sample_ids"]:
         h5_path = os.path.join(config["h5_dir"], f"{sample}.h5")
-        output_root = os.path.join(config["output_root"], f"{sample}_outputs")
+        feature_output_root = os.path.join(config["output_root"], "features")
+        output_root = os.path.join(feature_output_root, f"{sample}_features")
         os.makedirs(output_root, exist_ok=True)
         print(f"Processing sample {sample} with HDF5 file: {h5_path}")
         print(f"Output will be saved to: {output_root}")

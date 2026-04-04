@@ -86,11 +86,12 @@ def merge_config(defaults, yaml_config, cli_args):
 def find_feature_csv(input_root, sample_id):
     """
     Expected path:
-      {input_root}/{sample_id}_outputs/{sample_id}_radiomics_features.csv
+      {input_root}/features/{sample_id}_features/{sample_id}_radiomics_features.csv
     """
     csv_path = os.path.join(
         input_root,
-        f"{sample_id}_outputs",
+        "features",
+        f"{sample_id}_features",
         f"{sample_id}_radiomics_features.csv"
     )
     return csv_path
