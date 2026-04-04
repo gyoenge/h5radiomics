@@ -219,3 +219,6 @@ segmentation/
 
 # test files 
 output_test/*
+
+# model files
+models/*
