@@ -483,11 +483,23 @@ class CellViTInferenceAdapter:
         if raw is None:
             return None
 
-        if isinstance(raw, np.ndarray) and raw.ndim == 2:
-            return raw.astype(np.int32)
+        if isinstance(raw, np.ndarray):
+            raw = np.asarray(raw)
+            if raw.ndim == 2:
+                return raw.astype(np.int32)
+            if raw.ndim == 3 and 1 in raw.shape:
+                raw = np.squeeze(raw)
+                if raw.ndim == 2:
+                    return raw.astype(np.int32)
 
-        if torch.is_tensor(raw) and raw.ndim == 2:
-            return raw.detach().cpu().numpy().astype(np.int32)
+        if torch.is_tensor(raw):
+            raw = raw.detach().cpu().numpy()
+            if raw.ndim == 2:
+                return raw.astype(np.int32)
+            if raw.ndim == 3 and 1 in raw.shape:
+                raw = np.squeeze(raw)
+                if raw.ndim == 2:
+                    return raw.astype(np.int32)
 
         if isinstance(raw, dict):
             for k in [
@@ -508,6 +520,8 @@ class CellViTInferenceAdapter:
                         return v.astype(np.int32)
                     if v.ndim == 3 and v.shape[0] == 1:
                         return v[0].astype(np.int32)
+                    if v.ndim == 3 and v.shape[-1] == 1:
+                        return v[..., 0].astype(np.int32)
 
         return None
 
