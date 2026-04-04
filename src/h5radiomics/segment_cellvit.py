@@ -1,12 +1,13 @@
 """
 Example
 -------
+cd /root/workspace/h5radiomics/src 
 python -m h5radiomics.segment_cellvit \
   --h5_path /root/workspace/h5radiomics/h5/TENX99.h5 \
   --output_dir /root/workspace/h5radiomics/output_test/cellvit_patch_seg \
   --model_dir /root/workspace/h5radiomics/models \
   --model_name CellViT-SAM-H-x20.pth \
-  --patch_indices 400 500 501 \
+  --patch_indices 200 300 400 500 \
   --batch_size 8 \
   --num_workers 0 \
   --device cuda:0
@@ -352,7 +353,6 @@ class CellViTInferenceAdapter:
         import cv2
 
         pil = Image.fromarray(image)
-
         x = self.runner.inference_transforms(pil).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
@@ -362,14 +362,18 @@ class CellViTInferenceAdapter:
 
         print("[DEBUG] model output keys:", out.keys() if isinstance(out, dict) else type(out))
 
-        # 1) instance_map이 직접 있으면 그걸 최우선 사용
+        type_map = self._extract_type_map_from_output(out)
+
         if isinstance(out, dict) and "instance_map" in out:
             inst_map = out["instance_map"][0]
             if torch.is_tensor(inst_map):
                 inst_map = inst_map.detach().cpu().numpy()
-            return inst_map.astype(np.int32)
+            inst_map = inst_map.astype(np.int32)
+            return {
+                "instance_map": inst_map,
+                "type_map": type_map,
+            }
 
-        # 2) nuclei_binary_map만 있으면 binary -> connected components로 임시 instance map 생성
         print("[DEBUG] image shape:", image.shape, image.dtype, image.min(), image.max())
 
         if isinstance(out, dict) and "nuclei_binary_map" in out:
@@ -397,26 +401,10 @@ class CellViTInferenceAdapter:
             num_labels, labels = cv2.connectedComponents(fg)
             print("[DEBUG] connected components:", num_labels - 1)
 
-            return labels.astype(np.int32)
-
-        # 3) nuclei_map도 비슷하게 처리
-        elif isinstance(out, dict) and "nuclei_map" in out:
-            inst_map = out["nuclei_map"][0]
-            if torch.is_tensor(inst_map):
-                inst_map = inst_map.detach().cpu().numpy()
-            inst_map = np.asarray(inst_map)
-
-            if inst_map.ndim == 3:
-                if inst_map.shape[0] in (2, 3, 4):
-                    inst_map = np.argmax(inst_map, axis=0)
-                elif inst_map.shape[-1] in (2, 3, 4):
-                    inst_map = np.argmax(inst_map, axis=-1)
-                else:
-                    raise RuntimeError(f"Unexpected nuclei_map shape: {inst_map.shape}")
-
-            fg = (inst_map > 0).astype(np.uint8)
-            num_labels, labels = cv2.connectedComponents(fg)
-            return labels.astype(np.int32)
+            return {
+                "instance_map": labels.astype(np.int32),
+                "type_map": type_map,
+            }
 
         raise RuntimeError(
             f"Unknown output format. keys={list(out.keys()) if isinstance(out, dict) else type(out)}"
@@ -527,6 +515,46 @@ class CellViTInferenceAdapter:
 
         return None
 
+    def _extract_type_map_from_output(self, out: Any) -> Optional[np.ndarray]:
+        import torch
+        import numpy as np
+
+        if not isinstance(out, dict) or "nuclei_type_map" not in out:
+            return None
+
+        type_map = out["nuclei_type_map"][0]
+        if torch.is_tensor(type_map):
+            type_map = type_map.detach().cpu().numpy()
+        else:
+            type_map = np.asarray(type_map)
+
+        # 보통 (C, H, W) 또는 (H, W, C)
+        if type_map.ndim == 3:
+            if type_map.shape[0] <= 10:       # channel-first
+                type_map = np.argmax(type_map, axis=0)
+            elif type_map.shape[-1] <= 10:    # channel-last
+                type_map = np.argmax(type_map, axis=-1)
+            else:
+                raise RuntimeError(f"Unexpected nuclei_type_map shape: {type_map.shape}")
+        elif type_map.ndim != 2:
+            raise RuntimeError(f"Unexpected nuclei_type_map ndim: {type_map.ndim}")
+
+        return type_map.astype(np.int32)
+
+    def _instance_majority_type(self, inst_mask: np.ndarray, type_map: Optional[np.ndarray]) -> int:
+        import numpy as np
+
+        if type_map is None:
+            return -1
+
+        vals = type_map[inst_mask > 0]
+        vals = vals[vals > 0]   # 배경 0 제외하고 싶으면 유지
+        if vals.size == 0:
+            return -1
+
+        counts = np.bincount(vals.astype(np.int32))
+        return int(np.argmax(counts))
+
     def _raw_to_gdf(self, raw: Any) -> gpd.GeoDataFrame:
         gdf = self._extract_gdf_from_any(raw)
         if gdf is not None:
@@ -534,19 +562,52 @@ class CellViTInferenceAdapter:
                 gdf = gpd.GeoDataFrame(gdf, geometry="geometry", crs=None)
             return gdf
 
-        inst_map = self._extract_instance_map_from_any(raw)
+        inst_map = None
+        type_map = None
+
+        if isinstance(raw, dict):
+            inst_map = self._extract_instance_map_from_any(raw)
+            type_map = raw.get("type_map", None)
+        else:
+            inst_map = self._extract_instance_map_from_any(raw)
+
         if inst_map is not None:
             rows = []
             instance_ids = np.unique(inst_map)
             instance_ids = instance_ids[instance_ids > 0]
+
+            # PanNuke 기본 클래스 이름
+            class_name_map = {
+                0: "background",
+                1: "neoplastic",
+                2: "inflammatory",
+                3: "connective",
+                4: "dead",
+                5: "epithelial",
+            }
+
             for inst_id in instance_ids:
-                polys = polygon_from_mask(inst_map == inst_id)
+                mask = (inst_map == inst_id)
+                class_id = self._instance_majority_type(mask.astype(np.uint8), type_map)
+                class_name = class_name_map.get(class_id, f"class_{class_id}")
+
+                polys = polygon_from_mask(mask)
                 for poly in polys:
-                    rows.append({"cell_id_in_patch": int(inst_id), "geometry": poly})
+                    rows.append({
+                        "cell_id_in_patch": int(inst_id),
+                        "class_id": int(class_id),
+                        "class_name": class_name,
+                        "geometry": poly,
+                    })
 
             if rows:
                 return gpd.GeoDataFrame(rows, geometry="geometry", crs=None)
-            return gpd.GeoDataFrame({"cell_id_in_patch": []}, geometry=[], crs=None)
+
+            return gpd.GeoDataFrame(
+                {"cell_id_in_patch": [], "class_id": [], "class_name": []},
+                geometry=[],
+                crs=None,
+            )
 
         raise RuntimeError(
             f"Unsupported CellViT output type: {type(raw)}. "
@@ -582,26 +643,51 @@ def save_overlay_png(
 ):
     img = ensure_uint8_rgb(img)
 
-    patches = []
-    if len(gdf) > 0:
-        for geom in gdf.geometry:
-            for poly in iter_polygons(geom):
-                xy = np.asarray(poly.exterior.coords)
-                if len(xy) >= 3:
-                    patches.append(MplPolygon(xy, closed=True))
+    CLASS_COLOR_MAP = {
+        "neoplastic": "#ff4d4d",
+        "inflammatory": "#4da6ff",
+        "connective": "#00c853",
+        "dead": "#ffd54f",
+        "epithelial": "#ab47bc",
+        "background": "#9e9e9e",
+        "unknown": "#00ffff",
+    }
+    DEFAULT_COLOR = "#00ffff"
 
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.imshow(img)
-    if patches:
-        collection = PatchCollection(
-            patches,
-            facecolor="none",
-            edgecolor="lime",
-            linewidth=1.0,
-        )
-        ax.add_collection(collection)
+
+    # class별로 polygon 그림
+    if len(gdf) > 0:
+        for cls_name, sub_gdf in gdf.groupby("class_name"):
+            color = CLASS_COLOR_MAP.get(str(cls_name).lower(), DEFAULT_COLOR)
+
+            patches = []
+            for geom in sub_gdf.geometry:
+                for poly in iter_polygons(geom):
+                    xy = np.asarray(poly.exterior.coords)
+                    if len(xy) >= 3:
+                        patches.append(MplPolygon(xy, closed=True))
+
+            if patches:
+                collection = PatchCollection(
+                    patches,
+                    facecolor="none",
+                    edgecolor=color,
+                    linewidth=1.0,
+                )
+                ax.add_collection(collection)
+
+    # legend는 loop 밖에서
+    handles = [
+        Line2D([0], [0], color=color, lw=2, label=cls)
+        for cls, color in CLASS_COLOR_MAP.items()
+    ]
+    ax.legend(handles=handles, loc="lower left", fontsize=8)
+
     if title:
         ax.set_title(title)
+
     ax.axis("off")
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -633,6 +719,8 @@ def _postprocess_one_patch(
                     "patch_idx": int(patch_idx),
                     "barcode": barcode,
                     "cell_id_in_patch": int(r["cell_id_in_patch"]),
+                    "class_id": int(r["class_id"]) if "class_id" in gdf.columns and pd.notna(r["class_id"]) else -1,
+                    "class_name": str(r["class_name"]) if "class_name" in gdf.columns and pd.notna(r["class_name"]) else "unknown",
                     "coord_raw": None if coord is None else np.asarray(coord).tolist(),
                     "geometry": r.geometry,
                 }
@@ -729,6 +817,10 @@ def segment_h5_patches_with_cellvit(
 
         gdfs = predictor.predict_batch_to_gdfs(images)
 
+        print("[DEBUG] gdf columns:", list(gdfs[0].columns))
+        if len(gdfs) > 0:
+            print(gdfs[0].head())
+
         # overlay / geojson writing can be parallelized safely
         with ThreadPoolExecutor(max_workers=max(1, postprocess_threads)) as ex:
             futures = []
@@ -755,7 +847,14 @@ def segment_h5_patches_with_cellvit(
         merged_gdf = gpd.GeoDataFrame(all_rows, geometry="geometry", crs=None)
     else:
         merged_gdf = gpd.GeoDataFrame(
-            {"patch_idx": [], "barcode": [], "cell_id_in_patch": [], "coord_raw": []},
+            {
+                "patch_idx": [],
+                "barcode": [],
+                "cell_id_in_patch": [],
+                "class_id": [],
+                "class_name": [],
+                "coord_raw": [],
+            },
             geometry=[],
             crs=None,
         )
