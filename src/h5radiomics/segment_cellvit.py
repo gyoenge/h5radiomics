@@ -1,7 +1,7 @@
 """
 Example
 -------
-python src/segment_cellvit.py \
+python -m h5radiomics.segment_cellvit \
   --h5_path /root/workspace/h5radiomics/h5/TENX99.h5 \
   --output_dir /root/workspace/h5radiomics/output_test/cellvit_patch_seg \
   --model_dir /root/workspace/h5radiomics/models \
@@ -40,6 +40,7 @@ from shapely.geometry.base import BaseGeometry
 import matplotlib.pyplot as plt
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Polygon as MplPolygon
+from matplotlib.lines import Line2D
 
 import torch
 from torch.utils.data import Dataset, DataLoader
