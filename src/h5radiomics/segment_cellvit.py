@@ -1,7 +1,13 @@
+# segment_cellvit.py
 """
 Example
 -------
-cd /root/workspace/h5radiomics/src 
+(i) Using YAML config file:
+cd /root/workspace/h5radiomics/src
+python -m h5radiomics.segment_cellvit \
+  --config ../configs/segment_cellvit.yaml
+
+(ii) Using command-line arguments:
 python -m h5radiomics.segment_cellvit \
   --sample_ids TENX99 TENX95 NCBI783 NCBI785 \
   --input_dir /root/workspace/h5radiomics/h5 \
@@ -24,6 +30,8 @@ os.environ["RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE"] = "1"
 
 import inspect
 import json
+import argparse
+import yaml
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -32,13 +40,8 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-from pathlib import Path
-import tempfile
-import shutil
-
 import geopandas as gpd
 from shapely.geometry import Polygon, MultiPolygon, GeometryCollection
-from shapely.geometry.base import BaseGeometry
 
 import matplotlib.pyplot as plt
 from matplotlib.collections import PatchCollection
@@ -56,12 +59,108 @@ MODEL_SRC_MAP = {
     "CellViT-SAM-H-x20.pth": "1wP4WhHLNwyJv97AK42pWK8kPoWlrqi30",
 }
 
+
+# =========================================================
+# Config
+# =========================================================
+def get_default_config():
+    return {
+        "sample_ids": ["TENX99", "TENX95", "NCBI783", "NCBI785"],
+        "input_dir": "/root/workspace/h5radiomics/h5",
+        "output_dir": "/root/workspace/h5radiomics/outputs/cellvit_patch_seg",
+        "model_dir": "/root/workspace/h5radiomics/models",
+        "model_name": "CellViT-SAM-H-x20.pth",
+        "batch_size": 8,
+        "num_workers": 0,
+        "device": "cuda:0",
+        "patch_indices": None,
+        "save_png_overlay": True,
+        "use_class_color": True,
+        "save_geojson_per_patch": False,
+        "postprocess_threads": 1,
+    }
+
+
+def load_yaml_config(config_path):
+    with open(config_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"YAML config must be a mapping/dict, got: {type(data)}")
+    return data
+
+
+def merge_config(defaults, yaml_config, cli_args):
+    config = defaults.copy()
+
+    if yaml_config:
+        for k, v in yaml_config.items():
+            if v is not None:
+                config[k] = v
+
+    for k, v in vars(cli_args).items():
+        if k in ("config", "no_overlay", "no_class_color", "save_geojson_per_patch"):
+            continue
+        if v is not None:
+            config[k] = v
+
+    return config
+
+
+def str_to_bool(v):
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    v = str(v).strip().lower()
+    if v in ("true", "1", "yes", "y"):
+        return True
+    if v in ("false", "0", "no", "n"):
+        return False
+    raise ValueError(f"Cannot parse boolean value from: {v}")
+
+
+def normalize_config_types(config):
+    config["save_png_overlay"] = str_to_bool(config.get("save_png_overlay"))
+    config["use_class_color"] = str_to_bool(config.get("use_class_color"))
+    config["save_geojson_per_patch"] = str_to_bool(config.get("save_geojson_per_patch"))
+
+    if config.get("patch_indices") in ("None", "none", "", []):
+        config["patch_indices"] = None
+
+    return config
+
+
+def parse_args(args=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file")
+
+    parser.add_argument("--sample_ids", nargs="+", type=str, default=None)
+    parser.add_argument("--input_dir", type=str, default=None)
+    parser.add_argument("--output_dir", type=str, default=None)
+    parser.add_argument("--model_dir", type=str, default=None)
+    parser.add_argument("--model_name", type=str, default=None)
+
+    parser.add_argument("--batch_size", type=int, default=None)
+    parser.add_argument("--num_workers", type=int, default=None)
+    parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--patch_indices", type=int, nargs="*", default=None)
+    parser.add_argument("--postprocess_threads", type=int, default=None)
+
+    parser.add_argument("--no_overlay", action="store_true")
+    parser.add_argument("--no_class_color", action="store_true")
+    parser.add_argument("--save_geojson_per_patch", action="store_true")
+
+    return parser.parse_args(args)
+
+
 def infer_cellvit_model_type(model_name: str) -> str:
     name = model_name.upper()
     if "SAM" in name:
         return "SAM"
     if "HIPT" in name:
-        return "HIPT"
+            return "HIPT"
     raise ValueError(f"Cannot infer CellViT model type from model_name={model_name}")
 
 
@@ -213,7 +312,6 @@ class H5PatchDataset(Dataset):
     def __getitem__(self, i: int) -> Dict[str, Any]:
         patch_idx = self.patch_indices[i]
 
-        # worker-safe: open file inside __getitem__
         with h5py.File(self.h5_path, "r") as f:
             img = f[self.img_key][patch_idx]
             barcode_raw = f[self.barcode_key][patch_idx]
@@ -240,17 +338,6 @@ def collate_patches(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
 # CellViTInference adapter
 # =========================================================
 class CellViTInferenceAdapter:
-    """
-    Adapter for cellvit.detect_cells.CellViTInference.
-
-    This version matches the constructor that requires:
-      - model_path
-      - model_name
-      - outdir
-      - system_configuration
-    and then tries to find a usable inference method.
-    """
-
     def __init__(
         self,
         model_path: str,
@@ -270,7 +357,6 @@ class CellViTInferenceAdapter:
 
         self.runner = self._build_runner(CellViTInference, SystemConfiguration)
 
-        ### for debug 
         print("[DEBUG] runner callables:", [
             name for name in dir(self.runner)
             if not name.startswith("_") and callable(getattr(self.runner, name))
@@ -280,12 +366,10 @@ class CellViTInferenceAdapter:
         sig = inspect.signature(SystemConfiguration)
         kwargs = {}
 
-        # 최대한 보수적으로 공통 필드만 채움
         for name, param in sig.parameters.items():
             if name in ("device",):
                 kwargs[name] = self.device
             elif name in ("gpu", "gpu_id", "gpu_ids"):
-                # cuda:0 -> 0
                 if "cuda:" in self.device:
                     gpu_id = int(self.device.split(":")[-1])
                 else:
@@ -304,13 +388,11 @@ class CellViTInferenceAdapter:
             elif name in ("verbose",):
                 kwargs[name] = False
             elif param.default is not inspect._empty:
-                # default 있으면 건드리지 않음
                 pass
 
         try:
             return SystemConfiguration(**kwargs)
         except Exception:
-            # 정말 최소 생성
             return SystemConfiguration()
 
     def _build_runner(self, CellViTInference, SystemConfiguration):
@@ -349,9 +431,6 @@ class CellViTInferenceAdapter:
         return None
 
     def _predict_single_raw(self, image: np.ndarray):
-        import torch
-        from PIL import Image
-        import numpy as np
         import cv2
 
         pil = Image.fromarray(image)
@@ -413,14 +492,8 @@ class CellViTInferenceAdapter:
         )
 
     def _predict_batch_raw(self, images: List[np.ndarray]):
-        # batch 메서드가 실제로 있으면 사용
         result = self._try_call_method(
-            [
-                "predict_batch",
-                "process_batch",
-                "infer_batch",
-                "run_batch",
-            ],
+            ["predict_batch", "process_batch", "infer_batch", "run_batch"],
             images,
         )
         if result is not None:
@@ -428,12 +501,7 @@ class CellViTInferenceAdapter:
 
         pil_images = [Image.fromarray(img) for img in images]
         result = self._try_call_method(
-            [
-                "predict_batch",
-                "process_batch",
-                "infer_batch",
-                "run_batch",
-            ],
+            ["predict_batch", "process_batch", "infer_batch", "run_batch"],
             pil_images,
         )
         if result is not None:
@@ -518,9 +586,6 @@ class CellViTInferenceAdapter:
         return None
 
     def _extract_type_map_from_output(self, out: Any) -> Optional[np.ndarray]:
-        import torch
-        import numpy as np
-
         if not isinstance(out, dict) or "nuclei_type_map" not in out:
             return None
 
@@ -530,11 +595,10 @@ class CellViTInferenceAdapter:
         else:
             type_map = np.asarray(type_map)
 
-        # 보통 (C, H, W) 또는 (H, W, C)
         if type_map.ndim == 3:
-            if type_map.shape[0] <= 10:       # channel-first
+            if type_map.shape[0] <= 10:
                 type_map = np.argmax(type_map, axis=0)
-            elif type_map.shape[-1] <= 10:    # channel-last
+            elif type_map.shape[-1] <= 10:
                 type_map = np.argmax(type_map, axis=-1)
             else:
                 raise RuntimeError(f"Unexpected nuclei_type_map shape: {type_map.shape}")
@@ -544,13 +608,11 @@ class CellViTInferenceAdapter:
         return type_map.astype(np.int32)
 
     def _instance_majority_type(self, inst_mask: np.ndarray, type_map: Optional[np.ndarray]) -> int:
-        import numpy as np
-
         if type_map is None:
             return -1
 
         vals = type_map[inst_mask > 0]
-        vals = vals[vals > 0]   # 배경 0 제외하고 싶으면 유지
+        vals = vals[vals > 0]
         if vals.size == 0:
             return -1
 
@@ -578,7 +640,6 @@ class CellViTInferenceAdapter:
             instance_ids = np.unique(inst_map)
             instance_ids = instance_ids[instance_ids > 0]
 
-            # PanNuke 기본 클래스 이름
             class_name_map = {
                 0: "background",
                 1: "neoplastic",
@@ -642,7 +703,7 @@ def save_overlay_png(
     gdf: gpd.GeoDataFrame,
     save_path: str,
     title: Optional[str] = None,
-    use_class_color: bool = True,  
+    use_class_color: bool = True,
 ):
     img = ensure_uint8_rgb(img)
 
@@ -661,7 +722,6 @@ def save_overlay_png(
     ax.imshow(img)
 
     if use_class_color:
-        # class별로 polygon 그림
         if len(gdf) > 0:
             for cls_name, sub_gdf in gdf.groupby("class_name"):
                 color = CLASS_COLOR_MAP.get(str(cls_name).lower(), DEFAULT_COLOR)
@@ -682,7 +742,6 @@ def save_overlay_png(
                     )
                     ax.add_collection(collection)
     else:
-        # 단일 색 (기존 방식)
         patches = []
         for geom in gdf.geometry:
             for poly in iter_polygons(geom):
@@ -698,7 +757,6 @@ def save_overlay_png(
                 linewidth=1.0,
             ))
 
-    # legend는 loop 밖에서
     if use_class_color:
         handles = [
             Line2D([0], [0], color=color, lw=2, label=cls)
@@ -747,9 +805,6 @@ def _postprocess_one_patch(
                     "geometry": r.geometry,
                 }
             )
-
-    # raw_patch_path = os.path.join(overlay_dir, f"{barcode}_idx{patch_idx}_raw.png")
-    # Image.fromarray(img).save(raw_patch_path)
 
     overlay_path = None
     if overlay_dir is not None:
@@ -843,11 +898,10 @@ def segment_h5_patches_with_cellvit(
 
         gdfs = predictor.predict_batch_to_gdfs(images)
 
-        print("[DEBUG] gdf columns:", list(gdfs[0].columns))
         if len(gdfs) > 0:
+            print("[DEBUG] gdf columns:", list(gdfs[0].columns))
             print(gdfs[0].head())
 
-        # overlay / geojson writing can be parallelized safely
         with ThreadPoolExecutor(max_workers=max(1, postprocess_threads)) as ex:
             futures = []
             for img, gdf, patch_idx, barcode, coord in zip(images, gdfs, patch_idxs, barcodes, coords):
@@ -861,7 +915,7 @@ def segment_h5_patches_with_cellvit(
                         coord,
                         overlay_dir,
                         geojson_dir,
-                        use_class_color,  
+                        use_class_color,
                     )
                 )
 
@@ -889,6 +943,7 @@ def segment_h5_patches_with_cellvit(
     parquet_path = os.path.join(output_dir, "h5_patch_cellvit_seg.parquet")
     geojson_path = os.path.join(output_dir, "h5_patch_cellvit_seg.geojson")
     csv_path = os.path.join(output_dir, "h5_patch_cellvit_seg_meta.csv")
+    summary_json_path = os.path.join(output_dir, "summary.json")
 
     merged_gdf.to_parquet(parquet_path)
     merged_gdf.to_file(geojson_path, driver="GeoJSON")
@@ -904,55 +959,51 @@ def segment_h5_patches_with_cellvit(
         "overlay_dir": overlay_dir,
         "geojson_dir": geojson_dir,
     }
-    with open(os.path.join(output_dir, "summary.json"), "w") as f:
-        json.dump(summary, f, indent=2)
+    with open(summary_json_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2, ensure_ascii=False)
 
     print("[INFO] done")
     print(json.dumps(summary, indent=2))
     return parquet_path
 
 
-# =========================================================
-# cli
-# =========================================================
-def main():
-    import argparse
+def main(args=None):
+    cli_args = parse_args(args)
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--sample_ids", nargs="+", required=True)
-    parser.add_argument("--input_dir", type=str, required=True)
-    parser.add_argument("--output_dir", type=str, required=True)
-    parser.add_argument("--model_dir", type=str, default="/root/workspace/models")
-    parser.add_argument("--model_name", type=str, default="CellViT-SAM-H-x20.pth")
-    parser.add_argument("--batch_size", type=int, default=8)
-    parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--patch_indices", type=int, nargs="*", default=None)
-    parser.add_argument("--no_overlay", action="store_true")
-    parser.add_argument("--no_class_color", action="store_true")
-    parser.add_argument("--save_geojson_per_patch", action="store_true")
-    # parser.add_argument("--postprocess_threads", type=int, default=4)
-    parser.add_argument("--postprocess_threads", type=int, default=1)
-    args = parser.parse_args()
+    defaults = get_default_config()
+    yaml_config = load_yaml_config(cli_args.config) if cli_args.config else {}
+    config = merge_config(defaults, yaml_config, cli_args)
+    config = normalize_config_types(config)
 
-    model_path = os.path.join(args.model_dir, args.model_name)
-    verify_or_download_model(model_path, args.model_name)
+    if cli_args.no_overlay:
+        config["save_png_overlay"] = False
+    if cli_args.no_class_color:
+        config["use_class_color"] = False
+    if cli_args.save_geojson_per_patch:
+        config["save_geojson_per_patch"] = True
+
+    print("Configuration:")
+    for k, v in config.items():
+        print(f"  {k}: {v}")
+
+    model_path = os.path.join(config["model_dir"], config["model_name"])
+    verify_or_download_model(model_path, config["model_name"])
 
     predictor = CellViTInferenceAdapter(
         model_path=model_path,
         model_name=infer_cellvit_model_type(os.path.basename(model_path)),
-        output_dir=args.output_dir,   # 공용 runtime 폴더 용도
-        device=args.device,
+        output_dir=config["output_dir"],
+        device=config["device"],
     )
 
-    for sample_id in args.sample_ids:
-        h5_path = os.path.join(args.input_dir, f"{sample_id}.h5")
+    for sample_id in config["sample_ids"]:
+        h5_path = os.path.join(config["input_dir"], f"{sample_id}.h5")
 
         if not os.path.exists(h5_path):
             print(f"[WARNING] skip {sample_id}: h5 not found -> {h5_path}")
             continue
 
-        sample_output_dir = os.path.join(args.output_dir, f"{sample_id}_seg")
+        sample_output_dir = os.path.join(config["output_dir"], f"{sample_id}_seg")
 
         print("=" * 60)
         print(f"[INFO] Processing sample: {sample_id}")
@@ -963,17 +1014,17 @@ def main():
             h5_path=h5_path,
             output_dir=sample_output_dir,
             model_path=model_path,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            patch_indices=args.patch_indices,
-            save_png_overlay=not args.no_overlay,
-            use_class_color=not args.no_class_color,
-            save_geojson_per_patch=args.save_geojson_per_patch,
-            device=args.device,
-            postprocess_threads=args.postprocess_threads,
+            batch_size=config["batch_size"],
+            num_workers=config["num_workers"],
+            patch_indices=config["patch_indices"],
+            save_png_overlay=config["save_png_overlay"],
+            use_class_color=config["use_class_color"],
+            save_geojson_per_patch=config["save_geojson_per_patch"],
+            device=config["device"],
+            postprocess_threads=config["postprocess_threads"],
             predictor=predictor,
         )
-    
+
     try:
         import ray
         ray.shutdown()
