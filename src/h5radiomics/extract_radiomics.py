@@ -26,6 +26,7 @@ import os
 import argparse
 import yaml
 import h5py 
+import json
 import numpy as np
 import pandas as pd
 import SimpleITK as sitk
@@ -402,6 +403,36 @@ def extract_radiomics(
     }
 
 
+def make_parquet_safe(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    def convert_value(v):
+        if pd.isna(v) if not isinstance(v, (list, tuple, np.ndarray, dict)) else False:
+            return np.nan
+
+        # numpy scalar -> python scalar
+        if isinstance(v, np.generic):
+            return v.item()
+
+        # 0-d ndarray -> scalar
+        if isinstance(v, np.ndarray):
+            if v.ndim == 0:
+                return v.item()
+            # 1-d 이상 배열은 parquet scalar column에 바로 못 넣으므로 문자열/JSON으로 변환
+            return json.dumps(v.tolist(), ensure_ascii=False)
+
+        # list/tuple/dict 도 문자열로 저장
+        if isinstance(v, (list, tuple, dict)):
+            return json.dumps(v, ensure_ascii=False)
+
+        return v
+
+    for col in df.columns:
+        df[col] = df[col].map(convert_value)
+
+    return df
+
+
 def parse_args(args=None):
     parser = argparse.ArgumentParser(description="Extract radiomics features from HDF5 files.")
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config file")
@@ -478,13 +509,22 @@ def main(args=None):
             filters=config["filters"],
         )
 
-        # Save results to a CSV file
         df = pd.DataFrame(result["rows"])
+
+        # Save results to a CSV file
         csv_path = os.path.join(output_root, f"{sample}_radiomics_features.csv")
         df.to_csv(csv_path, index=False)
+
+        # Parquet 저장
+        df_parquet = make_parquet_safe(df)
+        parquet_path = os.path.join(output_root, f"{sample}_radiomics_features.parquet")
+        df_parquet.to_parquet(parquet_path, index=False)
+
         print(f"Finished processing sample {sample}. \
-                Total patches: {result['total_num_patches']}. \
-                Results saved to {csv_path}.")   
+                Total patches: {result['total_num_patches']}.")   
+        
+        print(f"Saved CSV: {csv_path}")
+        print(f"Saved Parquet: {parquet_path}")
 
 
 # =========================
