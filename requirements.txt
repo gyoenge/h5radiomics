@@ -1,0 +1,32 @@
+# Core
+numpy
+pandas
+pyyaml
+
+# HDF5
+h5py
+
+# Imaging
+Pillow
+SimpleITK
+
+# Radiomics
+pyradiomics
+
+# Visualization
+matplotlib
+tqdm
+
+# Geometry / GIS
+shapely
+geopandas
+
+# ML / DL
+torch
+torchvision
+
+# CellViT dependency
+opencv-python
+
+# Optional (model download)
+gdown

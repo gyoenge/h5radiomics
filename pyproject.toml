@@ -1,0 +1,26 @@
+[project]
+name = "h5radiomics"
+version = "0.1.0"
+description = "Pipeline for radiomics feature extraction and analysis from H5-based WSI patches."
+requires-python = ">=3.9"
+
+dependencies = [
+    "numpy",
+    "pandas",
+    "pyyaml",
+    "h5py",
+    "Pillow",
+    "SimpleITK",
+    "pyradiomics",
+    "matplotlib",
+    "tqdm",
+    "shapely",
+    "geopandas",
+    "torch",
+    "torchvision",
+    "opencv-python",
+    "gdown",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
