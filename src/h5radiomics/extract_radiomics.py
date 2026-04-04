@@ -4,10 +4,11 @@
 Example usage:
 
 (i) Using YAML config file:
-python extract_radiomics.py --config config.yaml
+cd /root/workspace/h5radiomics/src 
+python -m h5radiomics.extract_radiomics --config ../configs/default.yaml
 
 (ii) Using command-line arguments to override defaults or YAML config: 
-python extract_radiomics.py \
+python -m h5radiomics.extract_radiomics \
   --sample_ids TENX95 NCBI785 NCBI783 \
   --h5_dir /root/workspace/hest_data/eval/bench_data/IDC/patches \
   --output_root /root/workspace/impl/h5radiomics/output_test \
@@ -28,7 +29,7 @@ import SimpleITK as sitk
 from radiomics import featureextractor
 from PIL import Image
 
-from h5radiomics.src.utils import (
+from h5radiomics.utils import (
     get_img_key,
     get_coords_key,
     get_barcodes_key,

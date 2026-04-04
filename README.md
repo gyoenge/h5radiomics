@@ -4,22 +4,21 @@
 
 ### data inputs (need to prepare)
 -  `h5/*.h5` : patches (HEST-1k style)
--  `segmentation/*.parquet` : cell/nuclei segmentation masks (HEST-1k style)
 
 ### expected outputs 
-- `output/..` 
+- `outputs/..` 
 
 ### run 
 (i) Using YAML config file:
 ```bash
-cd src 
-python extract_radiomics.py --config config.yaml
+cd ./src 
+python -m h5radiomics.extract_radiomics --config ../configs/default.yaml
 ```
 
 (ii) Using command-line arguments to override defaults or YAML config: 
 ```bash 
-cd src 
-python extract_radiomics.py \
+cd ./src 
+python -m h5radiomics.extract_radiomics \
   --sample_ids NCBI785 NCBI783 \
   --h5_dir /root/workspace/h5radiomics/h5 \
   --output_root /root/workspace/h5radiomics/output_test \
