@@ -81,15 +81,15 @@ or
 
 ### Radiomics Extraction
 
-    python -m h5radiomics.extract_radiomics --config configs/default.yaml
+    python -m h5radiomics.extract_radiomics --config ../configs/default.yaml --num_workers 8 
 
 ### Feature Statistics
 
-    python -m h5radiomics.feature_statistics --config configs/stats.yaml
+    python -m h5radiomics.feature_statistics --config ../configs/stats.yaml
 
 ### Cell Segmentation
 
-    python -m h5radiomics.segment_cellvit --config configs/segment_cellvit.yaml
+    python -m h5radiomics.segment_cellvit --config ../configs/segment_cellvit.yaml
 
 ------------------------------------------------------------------------
 

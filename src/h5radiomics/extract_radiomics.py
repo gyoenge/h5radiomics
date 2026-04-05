@@ -46,6 +46,8 @@ from h5radiomics.utils import (
     make_base_name,
 )
 
+from typing import List, Tuple, Dict
+
 # to avoid too much logging from pyradiomics 
 import logging 
 logging.getLogger("radiomics").setLevel(logging.ERROR)
@@ -62,6 +64,11 @@ def get_default_config():
         "classes": ["firstorder", "glcm", "glrlm", "glszm", "gldm", "ngtdm"],
         "filters": ["Original"],
         "num_workers": 0,
+        "processing": {
+            "lower_q": 0.01,
+            "upper_q": 0.99,
+            "save_processed": True,
+        },
     }
 
 
@@ -78,11 +85,19 @@ def load_yaml_config(config_path):
 def merge_config(defaults, yaml_config, cli_args):
     config = defaults.copy()
 
+    # YAML merge (deep merge for dict)
     if yaml_config:
         for k, v in yaml_config.items():
-            if v is not None:
+            if v is None:
+                continue
+
+            if isinstance(v, dict) and isinstance(config.get(k), dict):
+                # nested dict merge
+                config[k].update(v)
+            else:
                 config[k] = v
 
+    # CLI override
     for k, v in vars(cli_args).items():
         if k in ("config", "save_patches", "no_save_patches"):
             continue
@@ -403,6 +418,176 @@ def extract_radiomics(
     }
 
 
+def get_radiomics_feature_columns(df: pd.DataFrame) -> List[str]:
+    """
+    Metadata/status/path/coord 등은 제외하고
+    실제 radiomics feature 컬럼만 골라낸다.
+    
+    일반적으로 pyradiomics 결과 컬럼은
+    - diagnostics_
+    - original_
+    - wavelet-
+    - log-sigma-
+    - square_
+    - squareroot_
+    - logarithm_
+    - exponential_
+    등으로 시작한다.
+    
+    여기서는 diagnostics_ 는 제외하고,
+    실제 학습/분석용 feature만 선택한다.
+    """
+    feature_prefixes = (
+        "original_",
+        "wavelet-",
+        "log-sigma-",
+        "square_",
+        "squareroot_",
+        "logarithm_",
+        "exponential_",
+    )
+
+    return [
+        col for col in df.columns
+        if col.startswith(feature_prefixes)
+    ]
+
+
+def clip_feature_series(
+    s: pd.Series,
+    lower_q: float = 0.01,
+    upper_q: float = 0.99,
+) -> Tuple[pd.Series, Dict[str, float]]:
+    """
+    1% / 99% quantile 기반 clipping.
+    
+    추가적으로 min/max가 극단적인 경우에도 동일한 clipping 결과가 자연스럽게 반영된다.
+    (즉, lower_bound보다 작은 값은 lower_bound로,
+         upper_bound보다 큰 값은 upper_bound로 자름)
+
+    NaN은 유지한다.
+    """
+    s_num = pd.to_numeric(s, errors="coerce")
+
+    valid = s_num.dropna()
+    if valid.empty:
+        return s_num, {
+            "lower_bound": np.nan,
+            "upper_bound": np.nan,
+            "mean": np.nan,
+            "std": np.nan,
+            "min_after_clip": np.nan,
+            "max_after_clip": np.nan,
+        }
+
+    lower_bound = valid.quantile(lower_q)
+    upper_bound = valid.quantile(upper_q)
+
+    clipped = s_num.clip(lower=lower_bound, upper=upper_bound)
+
+    return clipped, {
+        "lower_bound": float(lower_bound),
+        "upper_bound": float(upper_bound),
+        "mean": float(clipped.mean()) if not pd.isna(clipped.mean()) else np.nan,
+        "std": float(clipped.std(ddof=0)) if not pd.isna(clipped.std(ddof=0)) else np.nan,
+        "min_after_clip": float(clipped.min()) if not pd.isna(clipped.min()) else np.nan,
+        "max_after_clip": float(clipped.max()) if not pd.isna(clipped.max()) else np.nan,
+    }
+
+
+def z_normalize_series(s: pd.Series) -> pd.Series:
+    """
+    z = (x - mean) / std
+    std == 0 이거나 NaN이면 0으로 채운다.
+    """
+    s_num = pd.to_numeric(s, errors="coerce")
+    mean = s_num.mean()
+    std = s_num.std(ddof=0)
+
+    if pd.isna(std) or std == 0:
+        return pd.Series(np.zeros(len(s_num)), index=s_num.index, dtype=float)
+
+    return (s_num - mean) / std
+
+
+def minmax_rescale_series(s: pd.Series) -> pd.Series:
+    """
+    [0, 1] rescaling
+    max == min 이면 0으로 채운다.
+    """
+    s_num = pd.to_numeric(s, errors="coerce")
+    min_val = s_num.min()
+    max_val = s_num.max()
+
+    if pd.isna(min_val) or pd.isna(max_val) or max_val == min_val:
+        return pd.Series(np.zeros(len(s_num)), index=s_num.index, dtype=float)
+
+    return (s_num - min_val) / (max_val - min_val)
+
+
+def build_processed_feature_df(
+    df: pd.DataFrame,
+    status_col: str = "status",
+    ok_status: str = "ok",
+    lower_q: float = 0.01,
+    upper_q: float = 0.99,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    raw DataFrame에서 radiomics feature 컬럼만 골라
+    (i) clipping
+    (ii) z-normalization
+    (iii) [0,1] rescaling
+    수행한 processed DataFrame 생성.
+    
+    - metadata 컬럼은 그대로 유지
+    - feature 컬럼은 processed 값으로 대체
+    - status != ok 인 행은 feature를 NaN 유지
+    - 각 feature별 통계(summary)도 함께 반환
+    """
+    processed_df = df.copy()
+    feature_cols = get_radiomics_feature_columns(df)
+
+    if not feature_cols:
+        raise ValueError("No radiomics feature columns found to process.")
+
+    stats_rows = []
+
+    # 정상 추출된 row만 기준으로 후처리
+    ok_mask = processed_df[status_col] == ok_status
+
+    for col in feature_cols:
+        original_series = pd.to_numeric(processed_df.loc[ok_mask, col], errors="coerce")
+
+        clipped, clip_stats = clip_feature_series(
+            original_series,
+            lower_q=lower_q,
+            upper_q=upper_q,
+        )
+
+        z_norm = z_normalize_series(clipped)
+        scaled = minmax_rescale_series(z_norm)
+
+        # 정상 행만 processed 값 채우기
+        processed_df.loc[ok_mask, col] = scaled.astype(float)
+
+        # 비정상 행은 NaN 유지
+        processed_df.loc[~ok_mask, col] = np.nan
+
+        stats_rows.append({
+            "feature": col,
+            "lower_q": lower_q,
+            "upper_q": upper_q,
+            **clip_stats,
+            "z_mean": float(z_norm.mean()) if len(z_norm.dropna()) else np.nan,
+            "z_std": float(z_norm.std(ddof=0)) if len(z_norm.dropna()) else np.nan,
+            "scaled_min": float(scaled.min()) if len(scaled.dropna()) else np.nan,
+            "scaled_max": float(scaled.max()) if len(scaled.dropna()) else np.nan,
+        })
+
+    stats_df = pd.DataFrame(stats_rows)
+    return processed_df, stats_df
+
+
 def make_parquet_safe(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
@@ -520,11 +705,48 @@ def main(args=None):
         parquet_path = os.path.join(output_root, f"{sample}_radiomics_features.parquet")
         df_parquet.to_parquet(parquet_path, index=False)
 
-        print(f"Finished processing sample {sample}. \
+        print(f"Finished radiomcis extraction of sample {sample}. \
                 Total patches: {result['total_num_patches']}.")   
         
-        print(f"Saved CSV: {csv_path}")
-        print(f"Saved Parquet: {parquet_path}")
+        print(f"Saved raw CSV: {csv_path}")
+        print(f"Saved raw Parquet: {parquet_path}")
+
+        # Build processed features
+        processing_cfg = config.get("processing", {})
+
+        lower_q = processing_cfg.get("lower_q", 0.01)
+        upper_q = processing_cfg.get("upper_q", 0.99)
+        save_processed = processing_cfg.get("save_processed", True)
+
+        if save_processed:
+            processed_df, processed_stats_df = build_processed_feature_df(
+                df,
+                status_col="status",
+                ok_status="ok",
+                lower_q=lower_q,
+                upper_q=upper_q,
+            )
+
+            processed_csv_path = os.path.join(
+                output_root, f"{sample}_radiomics_features_processed.csv"
+            )
+            processed_df.to_csv(processed_csv_path, index=False)
+
+            processed_parquet = make_parquet_safe(processed_df)
+            processed_parquet_path = os.path.join(
+                output_root, f"{sample}_radiomics_features_processed.parquet"
+            )
+            processed_parquet.to_parquet(processed_parquet_path, index=False)
+
+            processed_stats_csv_path = os.path.join(
+                output_root, f"{sample}_radiomics_features_processed_stats.csv"
+            )
+            processed_stats_df.to_csv(processed_stats_csv_path, index=False)
+
+            print(f"Saved processed CSV: {processed_csv_path}")
+            print(f"Saved processed Parquet: {processed_parquet_path}")
+            print(f"Saved processed stats CSV: {processed_stats_csv_path}")
+            print(f"Processed config: lower_q={lower_q}, upper_q={upper_q}")
 
 
 # =========================

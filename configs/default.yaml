@@ -21,9 +21,14 @@ classes:
 
 filters:
   - Original
-  # - Wavelet
-  # - LoG
-  # - Square
-  # - SquareRoot
-  # - Logarithm
-  # - Exponential
+  - Wavelet
+  - LoG
+  - Square
+  - SquareRoot
+  - Logarithm
+  - Exponential
+
+processing:
+  lower_q: 0.01
+  upper_q: 0.99
+  save_processed: true
