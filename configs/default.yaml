@@ -9,7 +9,7 @@ sample_ids:
 h5_dir: /root/workspace/h5radiomics/h5
 output_root: /root/workspace/h5radiomics/outputs
 label: 255
-save_patches: false # true
+save_patches: true
 
 classes:
   - firstorder
@@ -27,6 +27,10 @@ filters:
   - SquareRoot
   - Logarithm
   - Exponential
+
+image_type_settings:
+  LoG:
+    sigma: [1.0, 2.0, 3.0]
 
 processing:
   lower_q: 0.01

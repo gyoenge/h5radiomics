@@ -64,6 +64,11 @@ def get_default_config():
         "classes": ["firstorder", "glcm", "glrlm", "glszm", "gldm", "ngtdm"],
         "filters": ["Original"],
         "num_workers": 0,
+        "image_type_settings": {
+            "LoG": {
+                "sigma": [1.0, 2.0, 3.0]
+            }
+        },
         "processing": {
             "lower_q": 0.01,
             "upper_q": 0.99,
@@ -107,58 +112,49 @@ def merge_config(defaults, yaml_config, cli_args):
     return config
 
 
-def build_radiomics_extractor(classes=None, filters=None, label=255):
+def build_radiomics_extractor(
+    classes=None,
+    filters=None,
+    label=255,
+    image_type_settings=None,
+):
     if classes is None:
         classes = ["firstorder", "glcm", "glrlm", "glszm", "gldm", "ngtdm"]
     if filters is None:
         filters = ["Original"]
+    if image_type_settings is None:
+        image_type_settings = {}
 
-    # Build and configure the pyradiomics feature extractor based on specified feature classes and filters.
     settings = {}
+    settings["binWidth"] = 25
+    settings["resampledPixelSpacing"] = None
+    settings["verbose"] = False
+    settings["label"] = label
+    settings["force2D"] = True
+    settings["force2Ddimension"] = 0
+    settings["distances"] = [1]
 
-    settings['binWidth'] = 25 # Default bin width for intensity discretization 
-    # small binWidth (e.g., 5) captures more detail but can be sensitive to noise, 
-    # while large binWidth (e.g., 50) provides smoother features but may lose important information. 
-    # A value of 25 is often a good starting point for stable features, but it may need to be adjusted based on the specific characteristics of the data.
-    
-    settings['resampledPixelSpacing'] = None # No resampling, use original pixel spacing
-    # settings['interpolator'] = sitk.sitkBSpline # Interpolation method for resampling (if resampling is used)
-    
-    settings['verbose'] = False # Disable verbose (logging) output from pyradiomics 
-    
-    settings['label'] = label # Label value in the mask to consider as foreground for feature extraction (since we use binary mask with 0 and 1, set label to 1 or 255 depending on how mask is saved)
-    
-    settings['force2D'] = True # Force 2D feature extraction (since our patches are 2D)
-    settings['force2Ddimension'] = 0 # Dimension to use for 2D feature extraction (0 for XY plane) 
-    # When working with 2D image patches, it's important to set force2D=True to ensure that pyradiomics calculates features based on 2D analysis rather than treating the patch as a thin 3D volume. 
-    # This prevents unintended consequences where texture and shape features might be calculated in a 3D context, which can lead to meaningless or unstable features when the image is essentially 2D. 
-    
-    settings['distances'] = [1] # Default distance for texture feature calculation (can be customized as needed)
-
-    # Other settings can be added here as needed, such as normalization, outlier removal, or specific parameters for certain features. 
-    # settings['normalize'] = True
-    # settings['normalizeScale'] = 100 # Default normalization settings (can be customized as needed)
-    # settings['removeOutliers'] = 3 # Default outlier removal settings (can be customized as needed)
-    # settings['voxelArrayShift'] = 0 # Default voxel array shift (can be customized as needed)
-    # settings['minimumROIDimensions'] = None # No minimum dimension requirement for the region of interest (ROI)
-    # settings['minimumROISize'] = None # No minimum size requirement for the ROI (
-    # resegmentRange = None # No resegmentation based on intensity range
-    # resegmentMode = None # No resegmentation based on mode
-
-    # Initialize pyradiomics feature extractor with settings 
     extractor = featureextractor.RadiomicsFeatureExtractor(**settings)
     extractor.disableAllFeatures()
 
-    # Enable specified feature classes
     if classes is not None:
         for cls in classes:
             extractor.enableFeatureClassByName(cls)
 
-    # Enable specified filters if provided
     image_types = set(filters or [])
-    image_types.add("Original")  # 항상 포함
+    image_types.add("Original")
+
     for filt in image_types:
-        extractor.enableImageTypeByName(filt)
+        if filt == "LoG":
+            log_cfg = image_type_settings.get("LoG", {})
+            sigma = log_cfg.get("sigma", [1.0, 2.0, 3.0])
+
+            if not isinstance(sigma, (list, tuple)) or len(sigma) == 0:
+                raise ValueError("image_type_settings['LoG']['sigma'] must be a non-empty list")
+
+            extractor.enableImageTypeByName("LoG", customArgs={"sigma": list(sigma)})
+        else:
+            extractor.enableImageTypeByName(filt)
 
     return extractor
 
@@ -265,6 +261,7 @@ def process_patch_chunk(
     filters,
     label,
     save_patches,
+    image_type_settings=None,
 ):
     rows = []
 
@@ -272,6 +269,7 @@ def process_patch_chunk(
         classes=classes,
         filters=filters,
         label=label,
+        image_type_settings=image_type_settings,
     )
 
     with h5py.File(h5_path, "r") as f:
@@ -325,6 +323,7 @@ def extract_radiomics(
     num_workers=0,
     classes=None,
     filters=None,
+    image_type_settings=None,
 ):
     with h5py.File(h5_path, "r") as f:
         img_key = get_img_key(f)
@@ -340,6 +339,7 @@ def extract_radiomics(
                 classes=classes,
                 filters=filters,
                 label=label,
+                image_type_settings=image_type_settings,
             )
 
         with h5py.File(h5_path, "r") as f:
@@ -397,6 +397,7 @@ def extract_radiomics(
                 filters,
                 label,
                 save_patches,
+                image_type_settings,
             )
             future_to_chunk_size[future] = len(chunk)
 
@@ -678,8 +679,9 @@ def main(args=None):
         # Initialize pyradiomics feature extractor with default settings (can be customized as needed)
         extractor = build_radiomics_extractor(
             classes=config["classes"],
-            filters=config["filters"], 
-            label=config["label"], 
+            filters=config["filters"],
+            label=config["label"],
+            image_type_settings=config.get("image_type_settings", {}),
         )
 
         # Extract radiomics features 
@@ -692,6 +694,7 @@ def main(args=None):
             num_workers=config["num_workers"],
             classes=config["classes"],
             filters=config["filters"],
+            image_type_settings=config.get("image_type_settings", {}),
         )
 
         df = pd.DataFrame(result["rows"])
