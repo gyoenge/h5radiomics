@@ -180,7 +180,7 @@ def process_single_patch(
 
     gray_patch = np.array(Image.fromarray(color_patch).convert("L"))
 
-    mask_patch = (gray_patch < 220).astype(np.uint8)
+    mask_patch = ((gray_patch > 30) & (gray_patch < 220)).astype(np.uint8) 
     mask_patch = (mask_patch * label).astype(np.uint8)
 
     coords = f[coords_key][i] if coords_key else None
