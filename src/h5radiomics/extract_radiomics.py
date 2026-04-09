@@ -209,6 +209,22 @@ def process_single_patch(
         Image.fromarray(gray_patch).save(gray_path)
         Image.fromarray(mask_patch).save(mask_path)
 
+        # also save masked color&gray 
+        masked_color_dir = os.path.join(output_root, "masked_color")
+        masked_gray_dir = os.path.join(output_root, "masked_gray")
+        os.makedirs(masked_color_dir, exist_ok=True)
+        os.makedirs(masked_gray_dir, exist_ok=True)
+        masked_color = color_patch * (mask_patch > 0)[..., None]
+        masked_gray = gray_patch * (mask_patch > 0)
+        mask_binary = (mask_patch > 0).astype(np.uint8)
+        masked_color = color_patch * mask_binary[..., None]
+        masked_gray = gray_patch * mask_binary
+        masked_color_path = os.path.join(masked_color_dir, f"{base_filename}.png")
+        masked_gray_path = os.path.join(masked_gray_dir, f"{base_filename}.png")
+        Image.fromarray(masked_color.astype(np.uint8)).save(masked_color_path)
+        Image.fromarray(masked_gray.astype(np.uint8)).save(masked_gray_path)
+
+
     if np.count_nonzero(mask_patch) < 50:
         return {
             "patch_idx": i,
