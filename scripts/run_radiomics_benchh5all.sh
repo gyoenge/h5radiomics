@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PYTHON_CMD="python -m h5radiomics.extract_radiomics"
-CONFIG_DIR="../configs/tmp"
-BASE_CONFIG="../configs/default.yaml"
+cd ./src
 
+PYTHON_CMD="python -m h5radiomics.extract_radiomics"
+CONFIG_DIR="../../configs/tmp"
 NUM_WORKERS=8
 
 mkdir -p "$CONFIG_DIR"
@@ -16,24 +16,36 @@ run_job () {
   shift 3
   local SAMPLE_IDS=("$@")
 
-  local CONFIG_PATH="${CONFIG_DIR}/${JOB_NAME}.yaml"
-
   echo "=================================================="
-  echo "[START] ${JOB_NAME}"
+  echo "[START JOB] ${JOB_NAME}"
   echo "H5_DIR      = ${H5_DIR}"
   echo "OUTPUT_ROOT = ${OUTPUT_ROOT}"
   echo "SAMPLES     = ${SAMPLE_IDS[*]}"
-  echo "CONFIG      = ${CONFIG_PATH}"
   echo "=================================================="
 
-  cat > "$CONFIG_PATH" <<EOF
+  for idx in "${!SAMPLE_IDS[@]}"; do
+    local SAMPLE_ID="${SAMPLE_IDS[$idx]}"
+    local SAVE_PATCHES="false"
+
+    if [ "$idx" -eq 0 ]; then
+      SAVE_PATCHES="true"
+    fi
+
+    local CONFIG_PATH="${CONFIG_DIR}/${JOB_NAME}_${SAMPLE_ID}.yaml"
+
+    echo "----------------------------------------"
+    echo "[RUN] JOB=${JOB_NAME} SAMPLE=${SAMPLE_ID} SAVE_PATCHES=${SAVE_PATCHES}"
+    echo "CONFIG=${CONFIG_PATH}"
+    echo "----------------------------------------"
+
+    cat > "$CONFIG_PATH" <<EOF
 sample_ids:
-$(for sid in "${SAMPLE_IDS[@]}"; do echo "  - ${sid}"; done)
+  - ${SAMPLE_ID}
 
 h5_dir: ${H5_DIR}
 output_root: ${OUTPUT_ROOT}
 label: 255
-save_patches: false
+save_patches: ${SAVE_PATCHES}
 
 classes:
   - firstorder
@@ -62,9 +74,12 @@ processing:
   save_processed: true
 EOF
 
-  $PYTHON_CMD --config "$CONFIG_PATH" --num_workers "$NUM_WORKERS"
+    $PYTHON_CMD --config "$CONFIG_PATH" --num_workers "$NUM_WORKERS"
+    echo "[DONE] ${JOB_NAME} / ${SAMPLE_ID}"
+    echo
+  done
 
-  echo "[DONE] ${JOB_NAME}"
+  echo "[DONE JOB] ${JOB_NAME}"
   echo
 }
 
@@ -73,6 +88,7 @@ INT_SAMPLES=()
 for i in $(seq 1 24); do
   INT_SAMPLES+=("INT${i}")
 done
+
 run_job "ccrcc_set" \
   "/root/workspace/datasets/hest_data/bench_h5/CCRCC/patches" \
   "/root/workspace/datasets/hest_data/bench_h5/CCRCC" \
@@ -91,7 +107,7 @@ run_job "hcc_set" \
 run_job "idc_set" \
   "/root/workspace/datasets/hest_data/bench_h5/IDC/patches" \
   "/root/workspace/datasets/hest_data/bench_h5/IDC" \
-  "NCBI783" "NCBI785" "TENX95" "TENX99" 
+  "NCBI783" "NCBI785" "TENX95" "TENX99"
 
 run_job "lung_set" \
   "/root/workspace/datasets/hest_data/bench_h5/LUNG/patches" \
@@ -101,7 +117,7 @@ run_job "lung_set" \
 run_job "lymph_idc_set" \
   "/root/workspace/datasets/hest_data/bench_h5/LYMPH_IDC/patches" \
   "/root/workspace/datasets/hest_data/bench_h5/LYMPH_IDC" \
-  "NCBI681" "NCBI682" "NCBI683" "NCBI684" 
+  "NCBI681" "NCBI682" "NCBI683" "NCBI684"
 
 run_job "paad_set" \
   "/root/workspace/datasets/hest_data/bench_h5/PAAD/patches" \
@@ -113,6 +129,7 @@ MEND_SAMPLES=()
 for i in $(seq 139 162); do
   MEND_SAMPLES+=("MEND${i}")
 done
+
 run_job "prad_set" \
   "/root/workspace/datasets/hest_data/bench_h5/PRAD/patches" \
   "/root/workspace/datasets/hest_data/bench_h5/PRAD" \
@@ -121,12 +138,12 @@ run_job "prad_set" \
 run_job "read_set" \
   "/root/workspace/datasets/hest_data/bench_h5/READ/patches" \
   "/root/workspace/datasets/hest_data/bench_h5/READ" \
-  "ZEN36" "ZEN40" "ZEN48" "ZEN49" 
+  "ZEN36" "ZEN40" "ZEN48" "ZEN49"
 
 run_job "skcm_set" \
   "/root/workspace/datasets/hest_data/bench_h5/SKCM/patches" \
   "/root/workspace/datasets/hest_data/bench_h5/SKCM" \
-
+  "TENX115" "TENX117"
 
 # chmod +x scripts/run_radiomics_benchh5all.sh
 # ./scripts/run_radiomics_benchh5all.sh
