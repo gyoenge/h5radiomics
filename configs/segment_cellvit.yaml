@@ -22,3 +22,5 @@ save_png_overlay: true
 use_class_color: true
 save_geojson_per_patch: false
 postprocess_threads: 1
+
+verbose: false

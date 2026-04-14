@@ -226,3 +226,6 @@ outputs/*
 models/
 models/*
 *.pth
+
+# test notebook 
+*/test.ipynb

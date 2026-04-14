@@ -78,6 +78,7 @@ def get_default_config():
         "use_class_color": True,
         "save_geojson_per_patch": False,
         "postprocess_threads": 1,
+        "verbose": False,
     }
 
 
@@ -125,14 +126,13 @@ def normalize_config_types(config):
     config["save_png_overlay"] = str_to_bool(config.get("save_png_overlay"))
     config["use_class_color"] = str_to_bool(config.get("use_class_color"))
     config["save_geojson_per_patch"] = str_to_bool(config.get("save_geojson_per_patch"))
+    config["verbose"] = str_to_bool(config.get("verbose"))
 
     patch_indices = config.get("patch_indices")
 
-    # 전체 patch 처리
     if patch_indices in ("None", "none", "", [], None):
         config["patch_indices"] = None
     elif isinstance(patch_indices, list):
-        # --patch_indices all
         if len(patch_indices) == 1 and str(patch_indices[0]).lower() == "all":
             config["patch_indices"] = None
         else:
@@ -159,12 +159,10 @@ def parse_args(args=None):
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--num_workers", type=int, default=None)
     parser.add_argument("--device", type=str, default=None)
-
-    # 기존: type=int, nargs="*"
-    # 수정: 문자열로 받고 나중에 normalize
     parser.add_argument("--patch_indices", nargs="*", default=None)
-
     parser.add_argument("--postprocess_threads", type=int, default=None)
+
+    parser.add_argument("--verbose", type=str, default=None)
 
     parser.add_argument("--no_overlay", action="store_true")
     parser.add_argument("--no_class_color", action="store_true")
@@ -180,6 +178,11 @@ def infer_cellvit_model_type(model_name: str) -> str:
     if "HIPT" in name:
             return "HIPT"
     raise ValueError(f"Cannot infer CellViT model type from model_name={model_name}")
+
+
+def debug_print(verbose: bool, *args, **kwargs):
+    if verbose:
+        print(*args, **kwargs)
 
 
 # =========================================================
@@ -362,6 +365,7 @@ class CellViTInferenceAdapter:
         model_name: str,
         output_dir: str,
         device: str = "cuda:0",
+        verbose: bool = False,
     ):
         from cellvit.detect_cells import CellViTInference, SystemConfiguration
 
@@ -369,17 +373,22 @@ class CellViTInferenceAdapter:
         self.model_name = infer_cellvit_model_type(model_name)
         self.output_dir = output_dir
         self.device = device
+        self.verbose = verbose
 
         self._tmp_root = os.path.join(output_dir, "_cellvit_runtime")
         os.makedirs(self._tmp_root, exist_ok=True)
 
         self.runner = self._build_runner(CellViTInference, SystemConfiguration)
 
-        print("[DEBUG] runner callables:", [
-            name for name in dir(self.runner)
-            if not name.startswith("_") and callable(getattr(self.runner, name))
-        ])
-
+        debug_print(
+            self.verbose,
+            "[DEBUG] runner callables:",
+            [
+                name for name in dir(self.runner)
+                if not name.startswith("_") and callable(getattr(self.runner, name))
+            ],
+        )
+    
     def _build_system_configuration(self, SystemConfiguration):
         sig = inspect.signature(SystemConfiguration)
         kwargs = {}
@@ -459,7 +468,11 @@ class CellViTInferenceAdapter:
 
         out = self.runner.apply_softmax_reorder(out)
 
-        print("[DEBUG] model output keys:", out.keys() if isinstance(out, dict) else type(out))
+        debug_print(
+            self.verbose,
+            "[DEBUG] model output keys:",
+            out.keys() if isinstance(out, dict) else type(out),
+        )
 
         type_map = self._extract_type_map_from_output(out)
 
@@ -467,22 +480,39 @@ class CellViTInferenceAdapter:
             inst_map = out["instance_map"][0]
             if torch.is_tensor(inst_map):
                 inst_map = inst_map.detach().cpu().numpy()
-            inst_map = inst_map.astype(np.int32)
+            inst_map = np.asarray(inst_map, dtype=np.int32)
             return {
                 "instance_map": inst_map,
                 "type_map": type_map,
             }
 
-        print("[DEBUG] image shape:", image.shape, image.dtype, image.min(), image.max())
+        debug_print(
+            self.verbose,
+            "[DEBUG] image shape:",
+            image.shape,
+            image.dtype,
+            image.min(),
+            image.max(),
+        )
 
         if isinstance(out, dict) and "nuclei_binary_map" in out:
             bin_map = out["nuclei_binary_map"][0]
+
             if torch.is_tensor(bin_map):
                 arr = bin_map.detach().cpu().numpy()
             else:
                 arr = np.asarray(bin_map)
 
-            print("[DEBUG] nuclei_binary_map raw shape:", arr.shape, "min:", arr.min(), "max:", arr.max())
+            arr = np.asarray(arr)
+            debug_print(
+                self.verbose,
+                "[DEBUG] nuclei_binary_map raw shape:",
+                arr.shape,
+                "min:",
+                arr.min(),
+                "max:",
+                arr.max(),
+            )
 
             if arr.ndim == 3:
                 if arr.shape[0] in (2, 3, 4):
@@ -490,18 +520,53 @@ class CellViTInferenceAdapter:
                 elif arr.shape[-1] in (2, 3, 4):
                     pred = np.argmax(arr, axis=-1)
                 else:
-                    raise RuntimeError(arr.shape)
-            else:
+                    raise RuntimeError(f"Unexpected nuclei_binary_map shape: {arr.shape}")
+            elif arr.ndim == 2:
                 pred = arr
+            else:
+                raise RuntimeError(f"Unexpected nuclei_binary_map ndim: {arr.ndim}")
+
+            pred = np.asarray(pred)
+            pred = np.squeeze(pred)
+
+            if pred.ndim != 2:
+                raise RuntimeError(f"pred must be 2D, got shape={pred.shape}")
 
             fg = (pred > 0).astype(np.uint8)
-            print("[DEBUG] fg ratio:", fg.mean())
+            fg = np.ascontiguousarray(fg)
+
+            debug_print(
+                self.verbose,
+                "[DEBUG] pred shape:",
+                pred.shape,
+                "pred dtype:",
+                pred.dtype,
+            )
+            debug_print(
+                self.verbose,
+                "[DEBUG] fg shape:",
+                fg.shape,
+                "fg dtype:",
+                fg.dtype,
+                "fg contiguous:",
+                fg.flags["C_CONTIGUOUS"],
+            )
+            debug_print(
+                self.verbose,
+                "[DEBUG] fg ratio:",
+                float(fg.mean()),
+            )
 
             num_labels, labels = cv2.connectedComponents(fg)
-            print("[DEBUG] connected components:", num_labels - 1)
+            debug_print(
+                self.verbose,
+                "[DEBUG] connected components:",
+                num_labels - 1,
+            )
 
+            labels = np.asarray(labels, dtype=np.int32)
             return {
-                "instance_map": labels.astype(np.int32),
+                "instance_map": labels,
                 "type_map": type_map,
             }
 
@@ -916,7 +981,7 @@ def segment_h5_patches_with_cellvit(
 
         gdfs = predictor.predict_batch_to_gdfs(images)
 
-        if len(gdfs) > 0:
+        if predictor.verbose and len(gdfs) > 0:
             print("[DEBUG] gdf columns:", list(gdfs[0].columns))
             print(gdfs[0].head())
 
@@ -1012,6 +1077,7 @@ def main(args=None):
         model_name=infer_cellvit_model_type(os.path.basename(model_path)),
         output_dir=config["output_dir"],
         device=config["device"],
+        verbose=config["verbose"],
     )
 
     for sample_id in config["sample_ids"]:
