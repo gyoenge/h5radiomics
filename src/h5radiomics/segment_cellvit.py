@@ -126,8 +126,22 @@ def normalize_config_types(config):
     config["use_class_color"] = str_to_bool(config.get("use_class_color"))
     config["save_geojson_per_patch"] = str_to_bool(config.get("save_geojson_per_patch"))
 
-    if config.get("patch_indices") in ("None", "none", "", []):
+    patch_indices = config.get("patch_indices")
+
+    # 전체 patch 처리
+    if patch_indices in ("None", "none", "", [], None):
         config["patch_indices"] = None
+    elif isinstance(patch_indices, list):
+        # --patch_indices all
+        if len(patch_indices) == 1 and str(patch_indices[0]).lower() == "all":
+            config["patch_indices"] = None
+        else:
+            config["patch_indices"] = [int(x) for x in patch_indices]
+    elif isinstance(patch_indices, str):
+        if patch_indices.lower() == "all":
+            config["patch_indices"] = None
+        else:
+            config["patch_indices"] = [int(patch_indices)]
 
     return config
 
@@ -145,7 +159,11 @@ def parse_args(args=None):
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--num_workers", type=int, default=None)
     parser.add_argument("--device", type=str, default=None)
-    parser.add_argument("--patch_indices", type=int, nargs="*", default=None)
+
+    # 기존: type=int, nargs="*"
+    # 수정: 문자열로 받고 나중에 normalize
+    parser.add_argument("--patch_indices", nargs="*", default=None)
+
     parser.add_argument("--postprocess_threads", type=int, default=None)
 
     parser.add_argument("--no_overlay", action="store_true")
