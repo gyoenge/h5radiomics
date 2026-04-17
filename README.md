@@ -164,6 +164,77 @@ Optional:
 
 ---
 
+## Data Inspection
+
+You can verify whether your dataset and pipeline outputs are correctly formatted using the inspection tool.
+
+### Inspect H5 inputs and outputs
+
+```bash
+python -m h5radiomics.pipelines.run_inspection \
+  --data_root data \
+  --all
+```
+
+### Inspect only H5 inputs
+
+```bash
+python -m h5radiomics.pipelines.run_inspection \
+  --data_root data \
+  --h5input
+```
+
+### Inspect only outputs
+
+```bash 
+python -m h5radiomics.pipelines.run_inspection \
+  --data_root data \
+  --output
+```
+
+### Inspect specific samples
+
+```bash 
+python -m h5radiomics.pipelines.run_inspection \
+  --data_root data \
+  --all \
+  --sample_ids TENX99 TENX95
+```
+
+### Save inspection results as JSON
+
+```bash 
+python -m h5radiomics.pipelines.run_inspection \
+  --data_root data \
+  --all \
+  --save_json inspection_report.json
+```
+
+### What it checks
+
+- H5 input
+  - Required keys (`img/imgs/images`)
+  - Image shape format
+  - Optional metadata (`coords`, `barcodes`)
+  - Number of patches
+- Outputs
+  - Directory structure correctness
+  - Presence of required files for each stage:
+    - extract
+    - processed features
+    - statistics (raw / processed)
+    - segmentation (CellViT)
+  - Stage completion status:
+    - `extract_done`
+    - `processed_done`
+    - `statistics_raw_done`
+    - `statistics_processed_done`
+    - `segment_done`
+
+This tool helps ensure that your pipeline results are complete, consistent, and reproducible.
+
+---
+
 ## Key Features
 
 - PyRadiomics-based feature extraction
