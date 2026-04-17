@@ -64,7 +64,7 @@ Each `.h5` file should contain:
 
 Firstly, create and activate conda environment: 
 ```bash
-conda create -n h5radiomics python=3.9
+conda create -n h5radiomics python=3.10  # cellvit requires >=3.10
 conda activate h5radiomics 
 ```
 
