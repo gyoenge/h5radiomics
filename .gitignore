@@ -209,6 +209,15 @@ __marimo__/
 
 #############
 
+# data files
+./*/data/
+./*/data/* 
+./*/data/*/
+./*/data/*/*
+
+# legacy
+/data/legacy/
+
 # h5 files
 h5/
 h5/*

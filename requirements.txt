@@ -1,32 +1,23 @@
-# Core
-numpy
-pandas
-pyyaml
+numpy==1.24.4
+pandas==1.5.3
+pyyaml==6.0
 
-# HDF5
-h5py
+h5py==3.9.0
 
-# Imaging
-Pillow
-SimpleITK
+Pillow==9.5.0
+SimpleITK==2.2.1
 
-# Radiomics
-pyradiomics
+pyradiomics==3.0.1
 
-# Visualization
-matplotlib
-tqdm
+matplotlib==3.7.1
+tqdm==4.65.0
 
-# Geometry / GIS
-shapely
-geopandas
+shapely==2.0.1
+geopandas==0.13.2
 
-# ML / DL
-torch
-torchvision
+torch==2.0.1
+torchvision==0.15.2
 
-# CellViT dependency
-opencv-python
+opencv-python==4.8.0.74
 
-# Optional (model download)
-gdown
+gdown==4.7.1
