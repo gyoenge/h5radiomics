@@ -391,7 +391,7 @@ def get_radiomics_feature_columns(df: pd.DataFrame) -> List[str]:
         "logarithm_",
         "exponential_",
     )
-    return [col for col in df.columns if col.startswith(feature_prefixes)]
+    return [col for col in df.columns if col.lower().startswith(feature_prefixes)]
 
 
 def clip_feature_series(
@@ -460,7 +460,11 @@ def build_processed_feature_df(
     feature_cols = get_radiomics_feature_columns(df)
 
     if not feature_cols:
-        raise ValueError("No radiomics feature columns found to process.")
+        sample_cols = df.columns[:30].tolist()
+        raise ValueError(
+            f"No radiomics feature columns found to process. "
+            f"Sample columns: {sample_cols}"
+        )
 
     stats_rows = []
     ok_mask = processed_df[status_col] == ok_status
