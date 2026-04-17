@@ -102,6 +102,8 @@ def main(args=None):
         )
 
         df = pd.DataFrame(result["rows"])
+        print(df["status"].value_counts(dropna=False).head(20))
+        print(df[df["status"] != "ok"]["status"].head(20).tolist())
 
         csv_path = get_raw_features_csv_path(config["output_dir"], sample_id)
         parquet_path = get_raw_features_parquet_path(config["output_dir"], sample_id)

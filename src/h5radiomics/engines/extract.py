@@ -123,6 +123,12 @@ def process_single_patch(
         masked_color_dir = get_patch_masked_color_dir(output_dir, sample_id)
         masked_gray_dir = get_patch_masked_gray_dir(output_dir, sample_id)
 
+        os.makedirs(color_dir, exist_ok=True)
+        os.makedirs(gray_dir, exist_ok=True)
+        os.makedirs(mask_dir, exist_ok=True)
+        os.makedirs(masked_color_dir, exist_ok=True)
+        os.makedirs(masked_gray_dir, exist_ok=True)
+
         color_path = f"{color_dir}/{base_filename}.png"
         gray_path = f"{gray_dir}/{base_filename}.png"
         mask_path = f"{mask_dir}/{base_filename}.png"
@@ -173,6 +179,7 @@ def process_single_patch(
         return row
 
     except Exception as e:
+        print(f"[ERROR] patch_idx={i}, sample_id={sample_id}, error={repr(e)}")
         return {
             "patch_idx": i,
             "barcode": barcode,
@@ -181,7 +188,7 @@ def process_single_patch(
             "mask_path": mask_path,
             "x": coords[0] if coords is not None else None,
             "y": coords[1] if coords is not None else None,
-            "status": f"error: {str(e)}",
+            "status": f"error: {repr(e)}",
         }
 
 
