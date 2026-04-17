@@ -1,4 +1,4 @@
-# h5radiomics
+# HEST-Radiomics (h5radiomics)
 
 Radiomics extraction pipeline from H5-based WSI (Whole Slide Image)
 patches.
