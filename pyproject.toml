@@ -23,15 +23,4 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["src"]
-
-[project.optional-dependencies]
-dev = [
-    "pytest",
-    "pytest-cov",
-]
-
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
+where = ["src/h5radiomics"]

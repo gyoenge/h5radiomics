@@ -1,28 +1,3 @@
-# segment_cellvit.py
-"""
-Example
--------
-(i) Using YAML config file:
-cd /root/workspace/h5radiomics/src
-python -m h5radiomics.segment_cellvit \
-  --config ../configs/segment_cellvit.yaml
-
-(ii) Using command-line arguments:
-python -m h5radiomics.segment_cellvit \
-  --sample_ids TENX99 TENX95 NCBI783 NCBI785 \
-  --input_dir /root/workspace/h5radiomics/h5 \
-  --output_dir /root/workspace/h5radiomics/outputs/cellvit_patch_seg \
-  --model_dir /root/workspace/h5radiomics/models \
-  --model_name CellViT-SAM-H-x20.pth \
-  --patch_indices 200 300 400 500 \
-  --batch_size 8 \
-  --num_workers 0 \
-  --device cuda:0
-"""
-# --no_class_color
-# --save_geojson_per_patch
-# --postprocess_threads 1
-
 from __future__ import annotations
 
 import os

@@ -1,22 +1,4 @@
-# feature_statistics.py
-"""
-Saved radiomics feature CSV files -> feature-wise statistics + representative patches
-
-Example usage:
-
-(i) Using YAML config file:
-cd /root/workspace/h5radiomics/src
-python -m h5radiomics.feature_statistics --config ../configs/stats.yaml
-
-(ii) Using command-line arguments:
-python -m h5radiomics.feature_statistics \
-  --sample_ids TENX95 NCBI785 NCBI783 TENX99 \
-  --input_root /root/workspace/h5radiomics/outputs \
-  --output_root /root/workspace/h5radiomics/outputs/statistics \
-  --status_filter ok \
-  --save_representatives true \
-  --save_boxplot true
-"""
+from __future__ import annotations
 
 import os
 import re

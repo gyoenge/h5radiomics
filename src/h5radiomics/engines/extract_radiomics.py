@@ -1,44 +1,19 @@
-# extract_radiomics.py
-# Radiomics feature extraction from HDF5 files containing image patches and associated metadata. 
-"""
-Example usage:
-
-(i) Using YAML config file:
-cd /root/workspace/h5radiomics/src 
-python -m h5radiomics.extract_radiomics \
-  --config ../configs/default.yaml \
-  --num_workers 8
-
-(ii) Using command-line arguments to override defaults or YAML config: 
-python -m h5radiomics.extract_radiomics \
-  --sample_ids TENX99 TENX95 NCBI785 NCBI783 \
-  --h5_dir /root/workspace/h5radiomics/h5 \
-  --output_root /root/workspace/h5radiomics/outputs \
-  --label 255 \
-  --save_patches \
-  --classes firstorder glcm glrlm glszm gldm ngtdm \
-  --filters Original \
-  --num_workers 8 
-""" 
-# --filters Original Wavelet LoG Square SquareRoot Logarithm Exponential 
+from __future__ import annotations
 
 import os 
-import argparse
-import yaml
-import h5py 
-import json
-import numpy as np
-import pandas as pd
-import SimpleITK as sitk
-
 import math
+from typing import List, Tuple, Dict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from radiomics import featureextractor
+import h5py 
+import numpy as np
+import pandas as pd
 from PIL import Image
 from tqdm import tqdm
+import SimpleITK as sitk
+from radiomics import featureextractor
 
-from h5radiomics.utils import (
+from h5radiomics.utils.utils import (
     get_img_key,
     get_coords_key,
     get_barcodes_key,
@@ -46,70 +21,9 @@ from h5radiomics.utils import (
     make_base_name,
 )
 
-from typing import List, Tuple, Dict
-
 # to avoid too much logging from pyradiomics 
 import logging 
 logging.getLogger("radiomics").setLevel(logging.ERROR)
-
-# =========================
-
-def get_default_config():
-    return {
-        "sample_ids": ["TENX95", "NCBI785", "NCBI783", "TENX99"],
-        "h5_dir": "/root/workspace/hest_data/eval/bench_data/IDC/patches",
-        "output_root": "/root/workspace/h5radiomics/outputs",
-        "label": 255,
-        "save_patches": False,
-        "classes": ["firstorder", "glcm", "glrlm", "glszm", "gldm", "ngtdm"],
-        "filters": ["Original"],
-        "num_workers": 0,
-        "image_type_settings": {
-            "LoG": {
-                "sigma": [1.0, 2.0, 3.0]
-            }
-        },
-        "processing": {
-            "lower_q": 0.01,
-            "upper_q": 0.99,
-            "save_processed": True,
-        },
-    }
-
-
-def load_yaml_config(config_path):
-    with open(config_path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise ValueError(f"YAML config must be a mapping/dict, got: {type(data)}")
-    return data
-
-
-def merge_config(defaults, yaml_config, cli_args):
-    config = defaults.copy()
-
-    # YAML merge (deep merge for dict)
-    if yaml_config:
-        for k, v in yaml_config.items():
-            if v is None:
-                continue
-
-            if isinstance(v, dict) and isinstance(config.get(k), dict):
-                # nested dict merge
-                config[k].update(v)
-            else:
-                config[k] = v
-
-    # CLI override
-    for k, v in vars(cli_args).items():
-        if k in ("config", "save_patches", "no_save_patches"):
-            continue
-        if v is not None:
-            config[k] = v
-
-    return config
 
 
 def build_radiomics_extractor(
@@ -157,6 +71,7 @@ def build_radiomics_extractor(
             extractor.enableImageTypeByName(filt)
 
     return extractor
+
 
 def process_single_patch(
     f,
@@ -604,172 +519,4 @@ def build_processed_feature_df(
     stats_df = pd.DataFrame(stats_rows)
     return processed_df, stats_df
 
-
-def make_parquet_safe(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-
-    def convert_value(v):
-        if pd.isna(v) if not isinstance(v, (list, tuple, np.ndarray, dict)) else False:
-            return np.nan
-
-        # numpy scalar -> python scalar
-        if isinstance(v, np.generic):
-            return v.item()
-
-        # 0-d ndarray -> scalar
-        if isinstance(v, np.ndarray):
-            if v.ndim == 0:
-                return v.item()
-            # 1-d 이상 배열은 parquet scalar column에 바로 못 넣으므로 문자열/JSON으로 변환
-            return json.dumps(v.tolist(), ensure_ascii=False)
-
-        # list/tuple/dict 도 문자열로 저장
-        if isinstance(v, (list, tuple, dict)):
-            return json.dumps(v, ensure_ascii=False)
-
-        return v
-
-    for col in df.columns:
-        df[col] = df[col].map(convert_value)
-
-    return df
-
-
-def parse_args(args=None):
-    parser = argparse.ArgumentParser(description="Extract radiomics features from HDF5 files.")
-    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file")
-
-    parser.add_argument("--sample_ids", nargs="+", type=str, default=None)
-    parser.add_argument("--h5_dir", type=str, default=None)
-    parser.add_argument("--output_root", type=str, default=None)
-    parser.add_argument("--label", type=int, default=None)
-
-    parser.add_argument("--classes", nargs="+", type=str, default=None)
-    parser.add_argument("--filters", nargs="+", type=str, default=None)
-
-    parser.add_argument("--save_patches", action="store_true")
-    parser.add_argument("--no_save_patches", action="store_true")
-
-    parser.add_argument(
-        "--num_workers",
-        type=int,
-        default=0,
-        help="Number of worker processes for multiprocessing. 0 or 1 means single-process.",
-    )
-
-    return parser.parse_args(args)
-    
-
-
-def main(args=None): 
-    # Parse command-line arguments and merge with defaults and YAML config if provided.
-    cli_args = parse_args(args)
-
-    defaults = get_default_config()
-    yaml_config = load_yaml_config(cli_args.config) if cli_args.config else {}
-
-    config = merge_config(defaults, yaml_config, cli_args)
-
-    if cli_args.save_patches:
-        config["save_patches"] = True
-    if cli_args.no_save_patches:
-        config["save_patches"] = False
-    
-    print("Configuration:")
-    for k, v in config.items():
-        print(f"  {k}: {v}")
-
-    # Process each sample ID 
-    for sample in config["sample_ids"]:
-        h5_path = os.path.join(config["h5_dir"], f"{sample}.h5")
-        feature_output_root = os.path.join(config["output_root"], "features")
-        output_root = os.path.join(feature_output_root, f"{sample}_features")
-        os.makedirs(output_root, exist_ok=True)
-        print(f"Processing sample {sample} with HDF5 file: {h5_path}")
-        print(f"Output will be saved to: {output_root}")
-
-        if not os.path.exists(h5_path):
-            print(f"[error] HDF5 file not found: {h5_path}")
-            continue
-
-        # Initialize pyradiomics feature extractor with default settings (can be customized as needed)
-        extractor = build_radiomics_extractor(
-            classes=config["classes"],
-            filters=config["filters"],
-            label=config["label"],
-            image_type_settings=config.get("image_type_settings", {}),
-        )
-
-        # Extract radiomics features 
-        result = extract_radiomics(
-            h5_path=h5_path,
-            output_root=output_root,
-            extractor=extractor if config["num_workers"] <= 1 else None,
-            label=config["label"],
-            save_patches=config["save_patches"],
-            num_workers=config["num_workers"],
-            classes=config["classes"],
-            filters=config["filters"],
-            image_type_settings=config.get("image_type_settings", {}),
-        )
-
-        df = pd.DataFrame(result["rows"])
-
-        # Save results to a CSV file
-        csv_path = os.path.join(output_root, f"{sample}_radiomics_features.csv")
-        df.to_csv(csv_path, index=False)
-
-        # Parquet 저장
-        df_parquet = make_parquet_safe(df)
-        parquet_path = os.path.join(output_root, f"{sample}_radiomics_features.parquet")
-        df_parquet.to_parquet(parquet_path, index=False)
-
-        print(f"Finished radiomcis extraction of sample {sample}. \
-                Total patches: {result['total_num_patches']}.")   
-        
-        print(f"Saved raw CSV: {csv_path}")
-        print(f"Saved raw Parquet: {parquet_path}")
-
-        # Build processed features
-        processing_cfg = config.get("processing", {})
-
-        lower_q = processing_cfg.get("lower_q", 0.01)
-        upper_q = processing_cfg.get("upper_q", 0.99)
-        save_processed = processing_cfg.get("save_processed", True)
-
-        if save_processed:
-            processed_df, processed_stats_df = build_processed_feature_df(
-                df,
-                status_col="status",
-                ok_status="ok",
-                lower_q=lower_q,
-                upper_q=upper_q,
-            )
-
-            processed_csv_path = os.path.join(
-                output_root, f"{sample}_radiomics_features_processed.csv"
-            )
-            processed_df.to_csv(processed_csv_path, index=False)
-
-            processed_parquet = make_parquet_safe(processed_df)
-            processed_parquet_path = os.path.join(
-                output_root, f"{sample}_radiomics_features_processed.parquet"
-            )
-            processed_parquet.to_parquet(processed_parquet_path, index=False)
-
-            processed_stats_csv_path = os.path.join(
-                output_root, f"{sample}_radiomics_features_processed_stats.csv"
-            )
-            processed_stats_df.to_csv(processed_stats_csv_path, index=False)
-
-            print(f"Saved processed CSV: {processed_csv_path}")
-            print(f"Saved processed Parquet: {processed_parquet_path}")
-            print(f"Saved processed stats CSV: {processed_stats_csv_path}")
-            print(f"Processed config: lower_q={lower_q}, upper_q={upper_q}")
-
-
-# =========================
-
-if __name__ == "__main__": 
-    main() 
 
