@@ -9,7 +9,7 @@ from h5radiomics.utils.config import (
     merge_config,
     str_to_bool,
 )
-from h5radiomics.utils.paths import get_segment_output_dir
+from h5radiomics.utils.paths import get_cellvitseg_dir
 from h5radiomics.engines.segment import (
     verify_or_download_model,
     infer_cellvit_model_type,
@@ -19,7 +19,9 @@ from h5radiomics.engines.segment import (
 
 
 def parse_args(args=None):
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Run CellViT segmentation for H5 patch files."
+    )
     parser.add_argument("--config", type=str, default=None)
 
     parser.add_argument("--sample_ids", nargs="+", type=str, default=None)
@@ -88,21 +90,27 @@ def main(args=None):
     model_path = os.path.join(config["model_dir"], config["model_name"])
     verify_or_download_model(model_path, config["model_name"])
 
-    predictor = CellViTInferenceAdapter(
-        model_path=model_path,
-        model_name=infer_cellvit_model_type(os.path.basename(model_path)),
-        output_dir=config["output_dir"],
-        device=config["device"],
-        verbose=config["verbose"],
-    )
-
     for sample_id in config["sample_ids"]:
         h5_path = os.path.join(config["input_dir"], f"{sample_id}.h5")
         if not os.path.exists(h5_path):
             print(f"[WARNING] skip {sample_id}: h5 not found -> {h5_path}")
             continue
 
-        sample_output_dir = get_segment_output_dir(config["output_dir"], sample_id)
+        sample_output_dir = get_cellvitseg_dir(config["output_dir"], sample_id)
+        os.makedirs(sample_output_dir, exist_ok=True)
+
+        predictor = CellViTInferenceAdapter(
+            model_path=model_path,
+            model_name=infer_cellvit_model_type(os.path.basename(model_path)),
+            output_dir=sample_output_dir,
+            device=config["device"],
+            verbose=config["verbose"],
+        )
+
+        print("=" * 60)
+        print(f"[INFO] Processing sample: {sample_id}")
+        print(f"[INFO] h5_path: {h5_path}")
+        print(f"[INFO] output_dir: {sample_output_dir}")
 
         segment_h5_patches_with_cellvit(
             h5_path=h5_path,

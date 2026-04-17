@@ -610,7 +610,10 @@ def save_overlay_png(
             )
 
     if use_class_color:
-        handles = [Line2D([0], [0], color=color, lw=2, label=cls) for cls, color in class_color_map.items()]
+        handles = [
+            Line2D([0], [0], color=color, lw=2, label=cls)
+            for cls, color in class_color_map.items()
+        ]
         ax.legend(handles=handles, loc="lower left", fontsize=8)
 
     if title:
@@ -699,6 +702,22 @@ def segment_h5_patches_with_cellvit(
     postprocess_threads: int = 4,
     predictor: Optional["CellViTInferenceAdapter"] = None,
 ) -> str:
+    """
+    Segment H5 patches with CellViT and save outputs under:
+
+      output_dir/
+        ├── cellseg.parquet
+        ├── cellseg.geojson
+        ├── metadata.csv
+        ├── summary.json
+        └── overlay/
+
+    Parameters
+    ----------
+    output_dir : str
+        Expected to be the sample-specific cellvitseg directory:
+        outputs/{sample_id}/cellvitseg
+    """
     os.makedirs(output_dir, exist_ok=True)
 
     overlay_dir = os.path.join(output_dir, "overlay") if save_png_overlay else None
@@ -786,9 +805,9 @@ def segment_h5_patches_with_cellvit(
             crs=None,
         )
 
-    parquet_path = os.path.join(output_dir, "h5_patch_cellvit_seg.parquet")
-    geojson_path = os.path.join(output_dir, "h5_patch_cellvit_seg.geojson")
-    csv_path = os.path.join(output_dir, "h5_patch_cellvit_seg_meta.csv")
+    parquet_path = os.path.join(output_dir, "cellseg.parquet")
+    geojson_path = os.path.join(output_dir, "cellseg.geojson")
+    csv_path = os.path.join(output_dir, "metadata.csv")
     summary_json_path = os.path.join(output_dir, "summary.json")
 
     merged_gdf.to_parquet(parquet_path)
@@ -811,4 +830,3 @@ def segment_h5_patches_with_cellvit(
     print("[INFO] done")
     print(json.dumps(summary, indent=2))
     return parquet_path
-

@@ -3,22 +3,24 @@ from __future__ import annotations
 import os
 import re
 import shutil
+from typing import Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-
-def find_feature_csv(input_root, sample_id):
-    return os.path.join(
-        input_root,
-        "features",
-        f"{sample_id}_features",
-        f"{sample_id}_radiomics_features.csv",
-    )
+from h5radiomics.utils.paths import (
+    get_feature_csv_path,
+    get_statistics_dir,
+    get_statistics_csv_path,
+    get_statistics_parquet_path,
+)
 
 
-def load_feature_csv(csv_path, status_filter="ok"):
+# =========================
+# basic utils
+# =========================
+def load_feature_csv(csv_path: str, status_filter: Optional[str] = "ok") -> pd.DataFrame:
     df = pd.read_csv(csv_path)
 
     if status_filter is not None and "status" in df.columns:
@@ -27,7 +29,7 @@ def load_feature_csv(csv_path, status_filter="ok"):
     return df
 
 
-def get_feature_columns(df, drop_diagnostic=True):
+def get_feature_columns(df: pd.DataFrame, drop_diagnostic: bool = True) -> List[str]:
     meta_cols = {
         "patch_idx",
         "barcode",
@@ -48,7 +50,7 @@ def get_feature_columns(df, drop_diagnostic=True):
     return feature_cols
 
 
-def compute_feature_statistics(df, feature_cols):
+def compute_feature_statistics(df: pd.DataFrame, feature_cols: List[str]) -> pd.DataFrame:
     rows = []
 
     for col in feature_cols:
@@ -85,7 +87,7 @@ def compute_feature_statistics(df, feature_cols):
     return stats_df
 
 
-def summarize_dataset(df, feature_cols):
+def summarize_dataset(df: pd.DataFrame, feature_cols: List[str]) -> Dict[str, int]:
     return {
         "num_rows": len(df),
         "num_feature_columns": len(feature_cols),
@@ -93,25 +95,30 @@ def summarize_dataset(df, feature_cols):
     }
 
 
-def save_statistics(stats_df, output_dir, prefix):
+def save_statistics(stats_df: pd.DataFrame, output_dir: str) -> tuple[str, str]:
     os.makedirs(output_dir, exist_ok=True)
-    csv_path = os.path.join(output_dir, f"{prefix}_feature_statistics.csv")
+
+    csv_path = os.path.join(output_dir, "stats.csv")
+    parquet_path = os.path.join(output_dir, "stats.parquet")
+
     stats_df.to_csv(csv_path, index=False)
-    return csv_path
+    stats_df.to_parquet(parquet_path, index=False)
+
+    return csv_path, parquet_path
 
 
-def sanitize_filename(text):
+def sanitize_filename(text) -> str:
     text = str(text)
     text = re.sub(r"[^\w\-.]+", "_", text)
     text = re.sub(r"_+", "_", text).strip("_")
     return text[:180] if len(text) > 180 else text
 
 
-def ensure_dir(path):
+def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
-def resolve_patch_path(row, preferred_col="color_path"):
+def resolve_patch_path(row: pd.Series, preferred_col: str = "color_path") -> Optional[str]:
     candidates = [preferred_col, "color_path", "gray_path", "mask_path"]
     seen = set()
 
@@ -128,7 +135,10 @@ def resolve_patch_path(row, preferred_col="color_path"):
     return None
 
 
-def get_target_stat_values(series):
+# =========================
+# representative selection
+# =========================
+def get_target_stat_values(series: pd.Series) -> Optional[Dict[str, float]]:
     s = pd.to_numeric(series, errors="coerce").dropna()
     if len(s) == 0:
         return None
@@ -144,7 +154,7 @@ def get_target_stat_values(series):
     }
 
 
-def select_representative_row(df, feature_col, target_value, stat_name):
+def select_representative_row(df: pd.DataFrame, feature_col: str, target_value: float, stat_name: str):
     temp = df.copy()
     temp[feature_col] = pd.to_numeric(temp[feature_col], errors="coerce")
     temp = temp[temp[feature_col].notna()].copy()
@@ -166,11 +176,20 @@ def select_representative_row(df, feature_col, target_value, stat_name):
     return row, abs_diff
 
 
-def save_representative_patches(df, feature_cols, output_dir, config, prefix="sample"):
+def save_representative_patches(
+    df: pd.DataFrame,
+    feature_cols: List[str],
+    output_dir: str,
+    config: dict,
+    prefix: str = "sample",
+) -> str:
     rep_root = os.path.join(output_dir, "representative")
     ensure_dir(rep_root)
 
-    requested_stats = config.get("representative_stats", ["min", "q10", "q25", "q50", "q75", "q90", "max"])
+    requested_stats = config.get(
+        "representative_stats",
+        ["min", "q10", "q25", "q50", "q75", "q90", "max"],
+    )
     preferred_image_col = config.get("representative_image_col", "color_path")
 
     manifest_rows = []
@@ -270,7 +289,10 @@ def save_representative_patches(df, feature_cols, output_dir, config, prefix="sa
     return manifest_csv
 
 
-def save_sample_feature_boxplot(df, feature_cols, output_dir, prefix):
+# =========================
+# boxplots
+# =========================
+def save_sample_feature_boxplot(df: pd.DataFrame, feature_cols: List[str], output_dir: str, prefix: str):
     if len(feature_cols) == 0:
         return None
 
@@ -327,7 +349,7 @@ def save_sample_feature_boxplot(df, feature_cols, output_dir, prefix):
     if len(scatter_x) > 0:
         ax.scatter(scatter_x, scatter_y, s=10, alpha=0.9)
 
-    ax.set_title("Radiomics Feature Distribution\nRepresentative patch position overlay", fontsize=11)
+    ax.set_title(f"Radiomics Feature Distribution ({prefix})\nRepresentative patch position overlay", fontsize=11)
     ax.set_xlabel("Feature")
     ax.set_ylabel("Feature value")
 
@@ -352,45 +374,11 @@ def extract_feature_class(feature_name: str) -> str:
     return "unknown"
 
 
-def zscore_features(df, feature_cols):
-    out = df.copy()
-
-    for col in feature_cols:
-        s = pd.to_numeric(out[col], errors="coerce")
-        mean = s.mean()
-        std = s.std()
-
-        if pd.isna(std) or std == 0:
-            out[col] = 0.0
-        else:
-            out[col] = (s - mean) / std
-
-    return out
-
-
-def minmax_rescale_features(df, feature_cols):
-    out = df.copy()
-
-    for col in feature_cols:
-        s = pd.to_numeric(out[col], errors="coerce")
-        vmin = s.min()
-        vmax = s.max()
-
-        if pd.isna(vmin) or pd.isna(vmax) or vmax == vmin:
-            out[col] = 0.0
-        else:
-            out[col] = (s - vmin) / (vmax - vmin)
-
-    return out
-
-
 def save_sample_feature_boxplots_by_class(
-    df,
-    feature_cols,
-    output_dir,
-    prefix,
-    file_tag="",
-    title_tag="raw",
+    df: pd.DataFrame,
+    feature_cols: List[str],
+    output_dir: str,
+    prefix: str,
 ):
     if len(feature_cols) == 0:
         return []
@@ -435,7 +423,7 @@ def save_sample_feature_boxplots_by_class(
                 if row is None:
                     continue
 
-                    actual_value = pd.to_numeric(row[feature_col], errors="coerce")
+                actual_value = pd.to_numeric(row[feature_col], errors="coerce")
                 if pd.isna(actual_value):
                     continue
 
@@ -460,7 +448,7 @@ def save_sample_feature_boxplots_by_class(
             ax.scatter(scatter_x, scatter_y, s=10, alpha=0.9)
 
         ax.set_title(
-            f"Radiomics Feature Distribution ({title_tag}, {feature_class})\nRepresentative patch position overlay",
+            f"Radiomics Feature Distribution ({prefix}, {feature_class})\nRepresentative patch position overlay",
             fontsize=11,
         )
         ax.set_xlabel("Feature")
@@ -472,11 +460,7 @@ def save_sample_feature_boxplots_by_class(
 
         plt.tight_layout()
 
-        if file_tag:
-            filename = f"{prefix}_{file_tag}_{sanitize_filename(feature_class)}_feature_boxplot.png"
-        else:
-            filename = f"{prefix}_{sanitize_filename(feature_class)}_feature_boxplot.png"
-
+        filename = f"{prefix}_{sanitize_filename(feature_class)}_feature_boxplot.png"
         save_path = os.path.join(boxplot_dir, filename)
         plt.savefig(save_path, dpi=200, bbox_inches="tight")
         plt.close(fig)
@@ -487,14 +471,22 @@ def save_sample_feature_boxplots_by_class(
     return saved_paths
 
 
-def process_single_sample(sample_id, config):
-    csv_path = find_feature_csv(config["input_root"], sample_id)
+# =========================
+# main per-table processing
+# =========================
+def process_single_feature_table(sample_id: str, config: dict, feature_type: str):
+    if feature_type not in ("raw", "processed"):
+        raise ValueError(f"feature_type must be 'raw' or 'processed', got: {feature_type}")
+
+    csv_path = get_feature_csv_path(config["output_dir"], sample_id, feature_type)
+    output_dir = get_statistics_dir(config["output_dir"], sample_id, feature_type)
 
     if not os.path.exists(csv_path):
-        print(f"[error] CSV not found for sample {sample_id}: {csv_path}")
+        print(f"[WARNING] CSV not found for sample={sample_id}, feature_type={feature_type}: {csv_path}")
         return None
 
-    print(f"[INFO] Loading sample: {sample_id}")
+    print("=" * 60)
+    print(f"[INFO] Loading sample={sample_id}, feature_type={feature_type}")
     print(f"[INFO] CSV path: {csv_path}")
 
     df = load_feature_csv(
@@ -508,110 +500,140 @@ def process_single_sample(sample_id, config):
     )
 
     summary = summarize_dataset(df, feature_cols)
-    print(f"[INFO] sample={sample_id}, rows={summary['num_rows']}, features={summary['num_feature_columns']}")
+    print(
+        f"[INFO] sample={sample_id}, feature_type={feature_type}, "
+        f"rows={summary['num_rows']}, features={summary['num_feature_columns']}"
+    )
 
     if len(feature_cols) == 0:
-        print(f"[warning] No feature columns found for sample {sample_id}")
+        print(f"[WARNING] No feature columns found for sample={sample_id}, feature_type={feature_type}")
         return None
 
     stats_df = compute_feature_statistics(df, feature_cols)
+    csv_out, parquet_out = save_statistics(stats_df, output_dir)
+    print(f"[INFO] Saved statistics CSV    : {csv_out}")
+    print(f"[INFO] Saved statistics Parquet: {parquet_out}")
 
-    output_dir = os.path.join(config["output_root"], f"{sample_id}_stats")
-
-    if config["save_per_sample"]:
-        csv_out = save_statistics(stats_df, output_dir, sample_id)
-        print(f"[INFO] Saved per-sample statistics CSV : {csv_out}")
+    # representative / boxplots용 sample_id 정보 보강
+    df_for_vis = df.copy()
+    if "sample_id" not in df_for_vis.columns:
+        df_for_vis["sample_id"] = sample_id
 
     if config.get("save_representatives", False):
         save_representative_patches(
-            df=df,
+            df=df_for_vis,
             feature_cols=feature_cols,
             output_dir=output_dir,
             config=config,
-            prefix=sample_id,
+            prefix=f"{sample_id}_{feature_type}",
         )
 
     if config.get("save_boxplot", False):
         save_sample_feature_boxplot(
-            df=df,
+            df=df_for_vis,
             feature_cols=feature_cols,
             output_dir=output_dir,
-            prefix=sample_id,
+            prefix=f"{sample_id}_{feature_type}",
         )
 
         save_sample_feature_boxplots_by_class(
-            df=df,
+            df=df_for_vis,
             feature_cols=feature_cols,
             output_dir=output_dir,
-            prefix=sample_id,
-            file_tag="",
-            title_tag="raw",
-        )
-
-        df_z = zscore_features(df, feature_cols)
-        save_sample_feature_boxplots_by_class(
-            df=df_z,
-            feature_cols=feature_cols,
-            output_dir=output_dir,
-            prefix=sample_id,
-            file_tag="z-score",
-            title_tag="z-score",
-        )
-
-        df_z01 = minmax_rescale_features(df_z, feature_cols)
-        save_sample_feature_boxplots_by_class(
-            df=df_z01,
-            feature_cols=feature_cols,
-            output_dir=output_dir,
-            prefix=sample_id,
-            file_tag="z-score-01-rescale",
-            title_tag="z-score -> [0,1] rescale",
+            prefix=f"{sample_id}_{feature_type}",
         )
 
     return {
         "sample_id": sample_id,
+        "feature_type": feature_type,
         "df": df,
         "feature_cols": feature_cols,
         "stats_df": stats_df,
+        "output_dir": output_dir,
     }
 
 
-def process_merged_samples(results, config):
-    valid_results = [r for r in results if r is not None]
-    if len(valid_results) == 0:
-        print("[warning] No valid sample results to merge.")
+def process_single_sample(sample_id: str, config: dict):
+    results = {}
+
+    for feature_type in ("raw", "processed"):
+        result = process_single_feature_table(sample_id, config, feature_type)
+        results[feature_type] = result
+
+    return {
+        "sample_id": sample_id,
+        "raw": results.get("raw"),
+        "processed": results.get("processed"),
+    }
+
+
+# =========================
+# optional merged processing
+# =========================
+def process_merged_samples(results, config: dict):
+    """
+    Optional merged statistics.
+    Saves under:
+      {output_dir}/_merged/statistics/raw/
+      {output_dir}/_merged/statistics/processed/
+    """
+    if not config.get("save_merged", False):
         return
 
-    merged_df_list = []
-    for r in valid_results:
-        temp = r["df"].copy()
-        temp["sample_id"] = r["sample_id"]
-        merged_df_list.append(temp)
+    for feature_type in ("raw", "processed"):
+        collected = []
+        for r in results:
+            if r is None:
+                continue
+            part = r.get(feature_type)
+            if part is None:
+                continue
 
-    merged_df = pd.concat(merged_df_list, axis=0, ignore_index=True)
+            temp = part["df"].copy()
+            temp["sample_id"] = r["sample_id"]
+            collected.append(temp)
 
-    feature_cols = get_feature_columns(
-        df=merged_df,
-        drop_diagnostic=config["drop_diagnostic"],
-    )
+        if len(collected) == 0:
+            print(f"[WARNING] No valid merged data for feature_type={feature_type}")
+            continue
 
-    print(f"[INFO] Merged rows={len(merged_df)}, features={len(feature_cols)}")
+        merged_df = pd.concat(collected, axis=0, ignore_index=True)
 
-    merged_stats_df = compute_feature_statistics(merged_df, feature_cols)
-
-    output_dir = os.path.join(config["output_root"], "merged_stats")
-    csv_out = save_statistics(merged_stats_df, output_dir, "merged")
-    print(f"[INFO] Saved merged statistics CSV : {csv_out}")
-
-    merged_csv_path = os.path.join(output_dir, "merged_filtered_features.csv")
-    merged_df.to_csv(merged_csv_path, index=False)
-    print(f"[INFO] Saved merged filtered feature table: {merged_csv_path}")
-
-    if config.get("save_representatives", False):
-        save_representative_patches(
+        feature_cols = get_feature_columns(
             df=merged_df,
-            feature_cols=feature_cols,
-            output_dir=output_dir,
-            config=config,
-            prefix="merged",
+            drop_diagnostic=config["drop_diagnostic"],
         )
+
+        print(f"[INFO] Merged feature_type={feature_type}, rows={len(merged_df)}, features={len(feature_cols)}")
+
+        merged_stats_df = compute_feature_statistics(merged_df, feature_cols)
+
+        output_dir = os.path.join(config["output_dir"], "_merged", "statistics", feature_type)
+        csv_out, parquet_out = save_statistics(merged_stats_df, output_dir)
+        print(f"[INFO] Saved merged statistics CSV    : {csv_out}")
+        print(f"[INFO] Saved merged statistics Parquet: {parquet_out}")
+
+        if config.get("save_representatives", False):
+            save_representative_patches(
+                df=merged_df,
+                feature_cols=feature_cols,
+                output_dir=output_dir,
+                config=config,
+                prefix=f"merged_{feature_type}",
+            )
+
+        if config.get("save_boxplot", False):
+            save_sample_feature_boxplot(
+                df=merged_df,
+                feature_cols=feature_cols,
+                output_dir=output_dir,
+                prefix=f"merged_{feature_type}",
+            )
+
+            save_sample_feature_boxplots_by_class(
+                df=merged_df,
+                feature_cols=feature_cols,
+                output_dir=output_dir,
+                prefix=f"merged_{feature_type}",
+            )
+

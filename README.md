@@ -1,57 +1,48 @@
 # HEST-Radiomics (h5radiomics)
 
-Radiomics extraction pipeline from H5-based WSI (Whole Slide Image)
-patches.
+Radiomics extraction and analysis pipeline for HDF5-based WSI (Whole Slide Image) patches.
 
-------------------------------------------------------------------------
+---
 
 ## Overview
 
-This project provides a complete pipeline for:
+This project provides an end-to-end pipeline for patch-level computational pathology:
 
--   Radiomics feature extraction from HDF5-stored WSI patches
--   Feature statistics analysis and visualization
--   Cell segmentation using CellViT
--   Efficient multi-processing for large-scale patch-level processing
+- Radiomics feature extraction from HDF5-based WSI patches
+- Feature preprocessing and normalization
+- Feature statistics analysis and visualization
+- Representative patch selection
+- Cell segmentation using CellViT
+- Scalable multi-processing for large datasets
 
-------------------------------------------------------------------------
+The pipeline is designed with a **consistent sample-wise directory structure** to ensure reproducibility and modular processing.
 
-## Project Structure
-
-    h5radiomics/
-    ├── src/
-    │   └── h5radiomics/
-    │       ├── extract_radiomics.py
-    │       ├── feature_statistics.py
-    │       ├── segment_cellvit.py
-    │       └── utils.py
-    ├── configs/
-    ├── h5/
-    ├── outputs/
-    ├── models/
-    └── README.md
-
+---
 
 ## Input Data (H5)
 
-Place your HDF5 patch files in the `h5/` directory.
+Place your HDF5 patch files in:
 
-Each `.h5` file should contain: 
+    data/h5/
 
-- Image patches (key: `img` / `imgs` / `images`)
+
+Each `.h5` file should contain:
+
+- Image patches  
+  - key: `img` / `imgs` / `images`
 - Optional:
   - `coords` (patch coordinates)
   - `barcode` / `barcodes`
 
 ### Example
 
-    h5/
+    data/h5/
     ├── NCBI783.h5
     ├── NCBI785.h5
     ├── TENX95.h5
     └── TENX99.h5
 
-### Expected H5 structure
+### Expected H5 Structure
 
     {
     "img": (N, H, W, 3) or (N, 3, H, W),
@@ -59,55 +50,123 @@ Each `.h5` file should contain:
     "barcodes": (N,) # optional
     }
 
+
+
 ### Notes
 
 - Images must be RGB patches
-- Patch size should be consistent (e.g., 224x224)
-- Masks are automatically generated from grayscale thresholding
+- Patch size should be consistent (e.g., 224×224)
+- Masks are automatically generated via grayscale thresholding
 
-------------------------------------------------------------------------
+---
 
 ## Installation
 
-    pip install -r requirements.txt
+```bash
+pip install -r requirements.txt
+# or 
+pip install -e .
+```
 
-or
-
-    pip install -e .
-
-------------------------------------------------------------------------
+---
 
 ## Usage
 
-### Radiomics Extraction
+### 1. Radiomics Feature Extraction
 
-    python -m h5radiomics.extract_radiomics --config ../configs/default.yaml --num_workers 8 
+```bash
+python -m h5radiomics.pipelines.run_extract \
+  --config configs/extract.yaml \
+  --num_workers 8
+```
 
-### Feature Statistics
+### 2. Feature Statistics
 
-    python -m h5radiomics.feature_statistics --config ../configs/stats.yaml
+```bash 
+python -m h5radiomics.pipelines.run_statistics \
+  --config configs/statistics.yaml
+```
 
-### Cell Segmentation
+### 3. Cell Segmentation (CellViT)
 
-    python -m h5radiomics.segment_cellvit --config ../configs/segment_cellvit.yaml
+```bash
+python -m h5radiomics.pipelines.run_segment \
+  --config configs/segment.yaml
+```
 
-------------------------------------------------------------------------
+---
 
-## Output
+## Output Directory Structure
 
--   CSV / Parquet feature files
--   Feature statistics + boxplots
--   Cell segmentation (GeoJSON / Parquet / overlay)
+    All outputs are organized per sample:
 
-------------------------------------------------------------------------
+    data/outputs/
+    └── {sample_id}/
+        ├── patches/
+        │   ├── color/
+        │   ├── gray/
+        │   ├── mask/
+        │   ├── masked_color/
+        │   └── masked_gray/
+        │
+        ├── features/
+        │   ├── raw/
+        │   │   ├── features.csv
+        │   │   └── features.parquet
+        │   │
+        │   ├── processed/
+        │   │   ├── features.csv
+        │   │   ├── features.parquet
+        │   │   ├── processing_stats.csv
+        │   │   └── processing_config.json
+        │   │
+        │   └── statistics/
+        │       ├── raw/
+        │       │   ├── stats.csv
+        │       │   ├── stats.parquet
+        │       │   ├── representative/
+        │       │   └── boxplots/
+        │       │
+        │       └── processed/
+        │           ├── stats.csv
+        │           ├── stats.parquet
+        │           ├── representative/
+        │           └── boxplots/
+        │
+        └── cellvitseg/
+            ├── cellseg.geojson
+            ├── cellseg.parquet
+            ├── metadata.csv
+            ├── summary.json
+            └── overlay/
 
-## Features
+---
 
--   PyRadiomics 기반 feature extraction
--   Multi-processing 최적화
--   Parquet 저장 지원
--   Feature normalization
--   Representative patch selection
--   CellViT segmentation
+## Key Features
 
-------------------------------------------------------------------------
+- PyRadiomics-based feature extraction
+- Patch-level processing from HDF5
+- Multi-processing for scalability
+- Structured feature preprocessing (clipping + normalization)
+- Raw vs processed feature separation
+- Detailed feature statistics and visualization
+- Representative patch selection (quantile-based)
+- Cell segmentation with CellViT
+- Standardized and reproducible output structure
+
+### Design Philosophy
+
+This pipeline is designed with:
+
+- Modularity: Separate engines for extract / statistics / segmentation
+- Reproducibility: All processing steps are saved with configs and metadata
+- Scalability: Multi-process support for large-scale WSI datasets
+- Consistency: Unified directory structure across all samples
+
+### Future Extensions
+
+- Feature embedding (TransTab / PCA / UMAP)
+- Clustering and phenotype discovery
+- Feature selection and importance analysis
+- Integration with downstream ML models
+

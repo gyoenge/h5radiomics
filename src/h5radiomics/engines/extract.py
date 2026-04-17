@@ -21,6 +21,13 @@ from h5radiomics.utils.h5 import (
     to_str_barcode,
 )
 from h5radiomics.utils.io import make_base_name
+from h5radiomics.utils.paths import (
+    get_patch_color_dir,
+    get_patch_gray_dir,
+    get_patch_mask_dir,
+    get_patch_masked_color_dir,
+    get_patch_masked_gray_dir,
+)
 
 # avoid too much logging from pyradiomics
 logging.getLogger("radiomics").setLevel(logging.ERROR)
@@ -79,7 +86,8 @@ def process_single_patch(
     coords_key,
     barcodes_key,
     i,
-    output_root,
+    output_dir: str,
+    sample_id: str,
     extractor,
     label=255,
     save_patches=True,
@@ -109,32 +117,27 @@ def process_single_patch(
     mask_path = ""
 
     if save_patches:
-        color_dir = os.path.join(output_root, "patches_color")
-        gray_dir = os.path.join(output_root, "patches_gray")
-        mask_dir = os.path.join(output_root, "patches_mask")
-        os.makedirs(color_dir, exist_ok=True)
-        os.makedirs(gray_dir, exist_ok=True)
-        os.makedirs(mask_dir, exist_ok=True)
+        color_dir = get_patch_color_dir(output_dir, sample_id)
+        gray_dir = get_patch_gray_dir(output_dir, sample_id)
+        mask_dir = get_patch_mask_dir(output_dir, sample_id)
+        masked_color_dir = get_patch_masked_color_dir(output_dir, sample_id)
+        masked_gray_dir = get_patch_masked_gray_dir(output_dir, sample_id)
 
-        color_path = os.path.join(color_dir, f"{base_filename}.png")
-        gray_path = os.path.join(gray_dir, f"{base_filename}.png")
-        mask_path = os.path.join(mask_dir, f"{base_filename}.png")
+        color_path = f"{color_dir}/{base_filename}.png"
+        gray_path = f"{gray_dir}/{base_filename}.png"
+        mask_path = f"{mask_dir}/{base_filename}.png"
 
         Image.fromarray(color_patch).save(color_path)
         Image.fromarray(gray_patch).save(gray_path)
         Image.fromarray(mask_patch).save(mask_path)
 
-        masked_color_dir = os.path.join(output_root, "masked_color")
-        masked_gray_dir = os.path.join(output_root, "masked_gray")
-        os.makedirs(masked_color_dir, exist_ok=True)
-        os.makedirs(masked_gray_dir, exist_ok=True)
-
         mask_binary = (mask_patch > 0).astype(np.uint8)
         masked_color = color_patch * mask_binary[..., None]
         masked_gray = gray_patch * mask_binary
 
-        masked_color_path = os.path.join(masked_color_dir, f"{base_filename}.png")
-        masked_gray_path = os.path.join(masked_gray_dir, f"{base_filename}.png")
+        masked_color_path = f"{masked_color_dir}/{base_filename}.png"
+        masked_gray_path = f"{masked_gray_dir}/{base_filename}.png"
+
         Image.fromarray(masked_color.astype(np.uint8)).save(masked_color_path)
         Image.fromarray(masked_gray.astype(np.uint8)).save(masked_gray_path)
 
@@ -185,7 +188,8 @@ def process_single_patch(
 def process_patch_chunk(
     h5_path,
     patch_indices,
-    output_root,
+    output_dir: str,
+    sample_id: str,
     classes,
     filters,
     label,
@@ -214,7 +218,8 @@ def process_patch_chunk(
                     coords_key=coords_key,
                     barcodes_key=barcodes_key,
                     i=i,
-                    output_root=output_root,
+                    output_dir=output_dir,
+                    sample_id=sample_id,
                     extractor=extractor,
                     label=label,
                     save_patches=save_patches,
@@ -247,7 +252,8 @@ def split_indices(indices, num_chunks):
 
 def extract_radiomics(
     h5_path,
-    output_root,
+    output_dir: str,
+    sample_id: str,
     extractor=None,
     label=255,
     save_patches=True,
@@ -256,12 +262,34 @@ def extract_radiomics(
     filters=None,
     image_type_settings=None,
 ):
+    """
+    Extract radiomics features from one H5 file.
+
+    Parameters
+    ----------
+    h5_path : str
+        Path to input H5 patch file.
+    output_dir : str
+        Global outputs root directory. Example:
+        /root/workspace/hest-radiomics/data/outputs
+    sample_id : str
+        Sample identifier. Example: TENX99
+    extractor : optional
+        Prebuilt pyradiomics extractor. Used in single-process mode.
+    label : int
+        Mask label value.
+    save_patches : bool
+        Whether to save color/gray/mask/masked patches.
+    num_workers : int
+        Multiprocessing workers. 0 or 1 means single-process.
+    """
     with h5py.File(h5_path, "r") as f:
         img_key = get_img_key(f)
         total_num_patches = len(f[img_key])
 
     patch_indices = list(range(total_num_patches))
 
+    # single-process
     if num_workers is None or num_workers <= 1:
         rows = []
 
@@ -286,7 +314,8 @@ def extract_radiomics(
                         coords_key=coords_key,
                         barcodes_key=barcodes_key,
                         i=i,
-                        output_root=output_root,
+                        output_dir=output_dir,
+                        sample_id=sample_id,
                         extractor=extractor,
                         label=label,
                         save_patches=save_patches,
@@ -311,6 +340,7 @@ def extract_radiomics(
             "rows": rows,
         }
 
+    # multi-process
     num_workers = min(num_workers, os.cpu_count() or 1)
     chunks = split_indices(patch_indices, num_workers * 64)
     rows = []
@@ -323,7 +353,8 @@ def extract_radiomics(
                 process_patch_chunk,
                 h5_path,
                 chunk,
-                output_root,
+                output_dir,
+                sample_id,
                 classes,
                 filters,
                 label,
@@ -360,7 +391,6 @@ def get_radiomics_feature_columns(df: pd.DataFrame) -> List[str]:
         "logarithm_",
         "exponential_",
     )
-
     return [col for col in df.columns if col.startswith(feature_prefixes)]
 
 

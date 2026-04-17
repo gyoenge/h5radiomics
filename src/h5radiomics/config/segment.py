@@ -5,8 +5,6 @@ from .base import get_common_default_config
 
 
 DEFAULT_CONFIG_SEGMENT = {
-    "input_dir": "/root/workspace/h5radiomics/h5",
-    "output_dir": "/root/workspace/h5radiomics/outputs/cellvit_patch_seg",
     "model_dir": "/root/workspace/h5radiomics/models",
     "model_name": "CellViT-SAM-H-x20.pth",
     "batch_size": 8,
