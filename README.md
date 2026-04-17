@@ -94,6 +94,28 @@ python -m h5radiomics.pipelines.run_segment \
   --config configs/segment.yaml
 ```
 
+### 4. Full Pipeline (Recommended)
+
+Run the entire pipeline (extract → statistics → segment):
+
+```bash 
+python -m h5radiomics.pipelines.run_full \
+  --config configs/full.yaml
+```
+
+Optional: 
+
+```bash
+# skip segmentation
+--skip_segment
+
+# run only statistics + segment
+--skip_extract
+
+# run only segmentation
+--skip_extract --skip_statistics
+```
+
 ---
 
 ## Output Directory Structure
