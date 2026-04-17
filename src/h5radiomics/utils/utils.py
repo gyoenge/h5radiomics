@@ -1,8 +1,12 @@
-# utils.py
-# Utility functions for HDF5 files containing image patches and associated metadata
+from __future__ import annotations
+
+import json
 import h5py
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
+
+# Utility functions for HDF5 files containing image patches and associated metadata
 
 # Handling metadata keys in HDF5 files
 
@@ -73,3 +77,33 @@ def show_patch(img):
     plt.imshow(img.astype(np.uint8))
     plt.axis('off')
     plt.show()
+
+
+def make_parquet_safe(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    def convert_value(v):
+        if pd.isna(v) if not isinstance(v, (list, tuple, np.ndarray, dict)) else False:
+            return np.nan
+
+        # numpy scalar -> python scalar
+        if isinstance(v, np.generic):
+            return v.item()
+
+        # 0-d ndarray -> scalar
+        if isinstance(v, np.ndarray):
+            if v.ndim == 0:
+                return v.item()
+            # 1-d 이상 배열은 parquet scalar column에 바로 못 넣으므로 문자열/JSON으로 변환
+            return json.dumps(v.tolist(), ensure_ascii=False)
+
+        # list/tuple/dict 도 문자열로 저장
+        if isinstance(v, (list, tuple, dict)):
+            return json.dumps(v, ensure_ascii=False)
+
+        return v
+
+    for col in df.columns:
+        df[col] = df[col].map(convert_value)
+
+    return df
