@@ -1,0 +1,13 @@
+sample_ids:
+  - TENX95
+  - NCBI785
+  - NCBI783
+  - TENX99
+
+input_root: /root/workspace/impl/h5radiomics/outputs
+output_root: /root/workspace/impl/h5radiomics/statistics
+
+status_filter: ok
+drop_diagnostic: true
+save_per_sample: true
+save_merged: true

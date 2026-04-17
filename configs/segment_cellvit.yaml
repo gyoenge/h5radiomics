@@ -1,0 +1,26 @@
+# segment_cellvit.yaml
+sample_ids:
+  - TENX99
+  - TENX95
+  - NCBI783
+  - NCBI785
+
+input_dir: /root/workspace/h5radiomics/h5
+output_dir: /root/workspace/h5radiomics/outputs/cellvit_patch_seg
+
+model_dir: /root/workspace/h5radiomics/models
+model_name: CellViT-SAM-H-x20.pth
+
+batch_size: 8
+num_workers: 0
+device: cuda:0
+
+patch_indices: all  # all 이면 전체 patch 
+# patch_indices: 200 300 400 500  # 몇 개 샘플만 
+
+save_png_overlay: true
+use_class_color: true
+save_geojson_per_patch: false
+postprocess_threads: 1
+
+verbose: false
