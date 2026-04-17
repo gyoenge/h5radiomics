@@ -1,28 +1,28 @@
 from __future__ import annotations
 
-import os 
+import logging
 import math
-from typing import List, Tuple, Dict
+import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import Dict, List, Tuple
 
-import h5py 
+import h5py
 import numpy as np
 import pandas as pd
-from PIL import Image
-from tqdm import tqdm
 import SimpleITK as sitk
+from PIL import Image
 from radiomics import featureextractor
+from tqdm import tqdm
 
-from h5radiomics.utils.utils import (
-    get_img_key,
-    get_coords_key,
+from h5radiomics.utils.h5 import (
     get_barcodes_key,
+    get_coords_key,
+    get_img_key,
     to_str_barcode,
-    make_base_name,
 )
+from h5radiomics.utils.io import make_base_name
 
-# to avoid too much logging from pyradiomics 
-import logging 
+# avoid too much logging from pyradiomics
 logging.getLogger("radiomics").setLevel(logging.ERROR)
 
 
@@ -39,21 +39,21 @@ def build_radiomics_extractor(
     if image_type_settings is None:
         image_type_settings = {}
 
-    settings = {}
-    settings["binWidth"] = 25
-    settings["resampledPixelSpacing"] = None
-    settings["verbose"] = False
-    settings["label"] = label
-    settings["force2D"] = True
-    settings["force2Ddimension"] = 0
-    settings["distances"] = [1]
+    settings = {
+        "binWidth": 25,
+        "resampledPixelSpacing": None,
+        "verbose": False,
+        "label": label,
+        "force2D": True,
+        "force2Ddimension": 0,
+        "distances": [1],
+    }
 
     extractor = featureextractor.RadiomicsFeatureExtractor(**settings)
     extractor.disableAllFeatures()
 
-    if classes is not None:
-        for cls in classes:
-            extractor.enableFeatureClassByName(cls)
+    for cls in classes:
+        extractor.enableFeatureClassByName(cls)
 
     image_types = set(filters or [])
     image_types.add("Original")
@@ -95,7 +95,7 @@ def process_single_patch(
 
     gray_patch = np.array(Image.fromarray(color_patch).convert("L"))
 
-    mask_patch = ((gray_patch > 30) & (gray_patch < 220)).astype(np.uint8) 
+    mask_patch = ((gray_patch > 30) & (gray_patch < 220)).astype(np.uint8)
     mask_patch = (mask_patch * label).astype(np.uint8)
 
     coords = f[coords_key][i] if coords_key else None
@@ -124,21 +124,19 @@ def process_single_patch(
         Image.fromarray(gray_patch).save(gray_path)
         Image.fromarray(mask_patch).save(mask_path)
 
-        # also save masked color&gray 
         masked_color_dir = os.path.join(output_root, "masked_color")
         masked_gray_dir = os.path.join(output_root, "masked_gray")
         os.makedirs(masked_color_dir, exist_ok=True)
         os.makedirs(masked_gray_dir, exist_ok=True)
-        masked_color = color_patch * (mask_patch > 0)[..., None]
-        masked_gray = gray_patch * (mask_patch > 0)
+
         mask_binary = (mask_patch > 0).astype(np.uint8)
         masked_color = color_patch * mask_binary[..., None]
         masked_gray = gray_patch * mask_binary
+
         masked_color_path = os.path.join(masked_color_dir, f"{base_filename}.png")
         masked_gray_path = os.path.join(masked_gray_dir, f"{base_filename}.png")
         Image.fromarray(masked_color.astype(np.uint8)).save(masked_color_path)
         Image.fromarray(masked_gray.astype(np.uint8)).save(masked_gray_path)
-
 
     if np.count_nonzero(mask_patch) < 50:
         return {
@@ -223,16 +221,18 @@ def process_patch_chunk(
                 )
                 rows.append(row)
             except Exception as e:
-                rows.append({
-                    "patch_idx": i,
-                    "barcode": None,
-                    "color_path": "",
-                    "gray_path": "",
-                    "mask_path": "",
-                    "x": None,
-                    "y": None,
-                    "status": f"error: {str(e)}",
-                })
+                rows.append(
+                    {
+                        "patch_idx": i,
+                        "barcode": None,
+                        "color_path": "",
+                        "gray_path": "",
+                        "mask_path": "",
+                        "x": None,
+                        "y": None,
+                        "status": f"error: {str(e)}",
+                    }
+                )
 
     return rows
 
@@ -240,7 +240,7 @@ def process_patch_chunk(
 def split_indices(indices, num_chunks):
     chunk_size = math.ceil(len(indices) / num_chunks)
     return [
-        indices[i:i + chunk_size]
+        indices[i : i + chunk_size]
         for i in range(0, len(indices), chunk_size)
     ]
 
@@ -262,9 +262,9 @@ def extract_radiomics(
 
     patch_indices = list(range(total_num_patches))
 
-    # single-process
     if num_workers is None or num_workers <= 1:
         rows = []
+
         if extractor is None:
             extractor = build_radiomics_extractor(
                 classes=classes,
@@ -293,26 +293,26 @@ def extract_radiomics(
                     )
                     rows.append(row)
                 except Exception as e:
-                    rows.append({
-                        "patch_idx": i,
-                        "barcode": None,
-                        "color_path": "",
-                        "gray_path": "",
-                        "mask_path": "",
-                        "x": None,
-                        "y": None,
-                        "status": f"error: {str(e)}",
-                    })
+                    rows.append(
+                        {
+                            "patch_idx": i,
+                            "barcode": None,
+                            "color_path": "",
+                            "gray_path": "",
+                            "mask_path": "",
+                            "x": None,
+                            "y": None,
+                            "status": f"error: {str(e)}",
+                        }
+                    )
 
         return {
             "total_num_patches": total_num_patches,
             "rows": rows,
         }
 
-    # multi-process
     num_workers = min(num_workers, os.cpu_count() or 1)
-    
-    chunks = split_indices(patch_indices, num_workers * 64) # chunk를 더 잘게 쪼개면 progress bar가 더 자연스럽게 움직임
+    chunks = split_indices(patch_indices, num_workers * 64)
     rows = []
 
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
@@ -332,9 +332,9 @@ def extract_radiomics(
             )
             future_to_chunk_size[future] = len(chunk)
 
-        with tqdm(total=len(chunks), desc="[Processing chunks]", position=0) as chunk_pbar, \
-            tqdm(total=total_num_patches, desc="[Processing patches]", position=1) as patch_pbar:
-
+        with tqdm(total=len(chunks), desc="[Processing chunks]", position=0) as chunk_pbar, tqdm(
+            total=total_num_patches, desc="[Processing patches]", position=1
+        ) as patch_pbar:
             for future in as_completed(future_to_chunk_size):
                 chunk_rows = future.result()
                 rows.extend(chunk_rows)
@@ -351,24 +351,6 @@ def extract_radiomics(
 
 
 def get_radiomics_feature_columns(df: pd.DataFrame) -> List[str]:
-    """
-    Metadata/status/path/coord 등은 제외하고
-    실제 radiomics feature 컬럼만 골라낸다.
-    
-    일반적으로 pyradiomics 결과 컬럼은
-    - diagnostics_
-    - original_
-    - wavelet-
-    - log-sigma-
-    - square_
-    - squareroot_
-    - logarithm_
-    - exponential_
-    등으로 시작한다.
-    
-    여기서는 diagnostics_ 는 제외하고,
-    실제 학습/분석용 feature만 선택한다.
-    """
     feature_prefixes = (
         "original_",
         "wavelet-",
@@ -379,10 +361,7 @@ def get_radiomics_feature_columns(df: pd.DataFrame) -> List[str]:
         "exponential_",
     )
 
-    return [
-        col for col in df.columns
-        if col.startswith(feature_prefixes)
-    ]
+    return [col for col in df.columns if col.startswith(feature_prefixes)]
 
 
 def clip_feature_series(
@@ -390,15 +369,6 @@ def clip_feature_series(
     lower_q: float = 0.01,
     upper_q: float = 0.99,
 ) -> Tuple[pd.Series, Dict[str, float]]:
-    """
-    1% / 99% quantile 기반 clipping.
-    
-    추가적으로 min/max가 극단적인 경우에도 동일한 clipping 결과가 자연스럽게 반영된다.
-    (즉, lower_bound보다 작은 값은 lower_bound로,
-         upper_bound보다 큰 값은 upper_bound로 자름)
-
-    NaN은 유지한다.
-    """
     s_num = pd.to_numeric(s, errors="coerce")
 
     valid = s_num.dropna()
@@ -428,10 +398,6 @@ def clip_feature_series(
 
 
 def z_normalize_series(s: pd.Series) -> pd.Series:
-    """
-    z = (x - mean) / std
-    std == 0 이거나 NaN이면 0으로 채운다.
-    """
     s_num = pd.to_numeric(s, errors="coerce")
     mean = s_num.mean()
     std = s_num.std(ddof=0)
@@ -443,10 +409,6 @@ def z_normalize_series(s: pd.Series) -> pd.Series:
 
 
 def minmax_rescale_series(s: pd.Series) -> pd.Series:
-    """
-    [0, 1] rescaling
-    max == min 이면 0으로 채운다.
-    """
     s_num = pd.to_numeric(s, errors="coerce")
     min_val = s_num.min()
     max_val = s_num.max()
@@ -464,18 +426,6 @@ def build_processed_feature_df(
     lower_q: float = 0.01,
     upper_q: float = 0.99,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    raw DataFrame에서 radiomics feature 컬럼만 골라
-    (i) clipping
-    (ii) z-normalization
-    (iii) [0,1] rescaling
-    수행한 processed DataFrame 생성.
-    
-    - metadata 컬럼은 그대로 유지
-    - feature 컬럼은 processed 값으로 대체
-    - status != ok 인 행은 feature를 NaN 유지
-    - 각 feature별 통계(summary)도 함께 반환
-    """
     processed_df = df.copy()
     feature_cols = get_radiomics_feature_columns(df)
 
@@ -483,8 +433,6 @@ def build_processed_feature_df(
         raise ValueError("No radiomics feature columns found to process.")
 
     stats_rows = []
-
-    # 정상 추출된 row만 기준으로 후처리
     ok_mask = processed_df[status_col] == ok_status
 
     for col in feature_cols:
@@ -499,24 +447,21 @@ def build_processed_feature_df(
         z_norm = z_normalize_series(clipped)
         scaled = minmax_rescale_series(z_norm)
 
-        # 정상 행만 processed 값 채우기
         processed_df.loc[ok_mask, col] = scaled.astype(float)
-
-        # 비정상 행은 NaN 유지
         processed_df.loc[~ok_mask, col] = np.nan
 
-        stats_rows.append({
-            "feature": col,
-            "lower_q": lower_q,
-            "upper_q": upper_q,
-            **clip_stats,
-            "z_mean": float(z_norm.mean()) if len(z_norm.dropna()) else np.nan,
-            "z_std": float(z_norm.std(ddof=0)) if len(z_norm.dropna()) else np.nan,
-            "scaled_min": float(scaled.min()) if len(scaled.dropna()) else np.nan,
-            "scaled_max": float(scaled.max()) if len(scaled.dropna()) else np.nan,
-        })
+        stats_rows.append(
+            {
+                "feature": col,
+                "lower_q": lower_q,
+                "upper_q": upper_q,
+                **clip_stats,
+                "z_mean": float(z_norm.mean()) if len(z_norm.dropna()) else np.nan,
+                "z_std": float(z_norm.std(ddof=0)) if len(z_norm.dropna()) else np.nan,
+                "scaled_min": float(scaled.min()) if len(scaled.dropna()) else np.nan,
+                "scaled_max": float(scaled.max()) if len(scaled.dropna()) else np.nan,
+            }
+        )
 
     stats_df = pd.DataFrame(stats_rows)
     return processed_df, stats_df
-
-

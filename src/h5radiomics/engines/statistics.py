@@ -3,80 +3,19 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import argparse
-import yaml
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
-
-# =========================
-# Config
-# =========================
-
-def get_default_config():
-    return {
-        "sample_ids": ["TENX95", "NCBI785", "NCBI783", "TENX99"],
-        "input_root": "/root/workspace/impl/h5radiomics/output",
-        "output_root": "/root/workspace/impl/h5radiomics/statistics",
-        "status_filter": "ok",   # None or "ok"
-        "drop_diagnostic": True,
-        "save_per_sample": True,
-        "save_merged": True,
-
-        # representative patch options
-        "save_representatives": True,
-        "representative_image_col": "color_path",  # fallback: gray_path -> mask_path
-        "representative_stats": ["min", "q10", "q25", "q50", "q75", "q90", "max"],
-
-        # boxplot option
-        "save_boxplot": True,
-    }
-
-
-def load_yaml_config(config_path):
-    with open(config_path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise ValueError(f"YAML config must be a mapping/dict, got: {type(data)}")
-    return data
-
-
-def merge_config(defaults, yaml_config, cli_args):
-    config = defaults.copy()
-
-    if yaml_config:
-        for k, v in yaml_config.items():
-            if v is not None:
-                config[k] = v
-
-    for k, v in vars(cli_args).items():
-        if k == "config":
-            continue
-        if v is not None:
-            config[k] = v
-
-    return config
-
-
-# =========================
-# Utils
-# =========================
 
 def find_feature_csv(input_root, sample_id):
-    """
-    Expected path:
-      {input_root}/features/{sample_id}_features/{sample_id}_radiomics_features.csv
-    """
-    csv_path = os.path.join(
+    return os.path.join(
         input_root,
         "features",
         f"{sample_id}_features",
-        f"{sample_id}_radiomics_features.csv"
+        f"{sample_id}_radiomics_features.csv",
     )
-    return csv_path
 
 
 def load_feature_csv(csv_path, status_filter="ok"):
@@ -89,13 +28,15 @@ def load_feature_csv(csv_path, status_filter="ok"):
 
 
 def get_feature_columns(df, drop_diagnostic=True):
-    """
-    Select only numeric radiomics feature columns.
-    Exclude metadata columns and optionally exclude diagnostic columns.
-    """
     meta_cols = {
-        "patch_idx", "barcode", "color_path", "gray_path", "mask_path",
-        "x", "y", "status"
+        "patch_idx",
+        "barcode",
+        "color_path",
+        "gray_path",
+        "mask_path",
+        "x",
+        "y",
+        "status",
     }
 
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -108,10 +49,6 @@ def get_feature_columns(df, drop_diagnostic=True):
 
 
 def compute_feature_statistics(df, feature_cols):
-    """
-    Compute feature-wise statistics.
-    Output: rows=feature_name, columns=statistics
-    """
     rows = []
 
     for col in feature_cols:
@@ -149,12 +86,11 @@ def compute_feature_statistics(df, feature_cols):
 
 
 def summarize_dataset(df, feature_cols):
-    summary = {
+    return {
         "num_rows": len(df),
         "num_feature_columns": len(feature_cols),
         "num_total_columns": len(df.columns),
     }
-    return summary
 
 
 def save_statistics(stats_df, output_dir, prefix):
@@ -176,13 +112,6 @@ def ensure_dir(path):
 
 
 def resolve_patch_path(row, preferred_col="color_path"):
-    """
-    Priority:
-      1) preferred_col
-      2) color_path
-      3) gray_path
-      4) mask_path
-    """
     candidates = [preferred_col, "color_path", "gray_path", "mask_path"]
     seen = set()
 
@@ -200,9 +129,6 @@ def resolve_patch_path(row, preferred_col="color_path"):
 
 
 def get_target_stat_values(series):
-    """
-    Return desired representative target values for one feature.
-    """
     s = pd.to_numeric(series, errors="coerce").dropna()
     if len(s) == 0:
         return None
@@ -219,12 +145,6 @@ def get_target_stat_values(series):
 
 
 def select_representative_row(df, feature_col, target_value, stat_name):
-    """
-    Select one actual patch row closest to target_value.
-
-    - min/max: exact idxmin/idxmax
-    - quantiles: nearest actual value
-    """
     temp = df.copy()
     temp[feature_col] = pd.to_numeric(temp[feature_col], errors="coerce")
     temp = temp[temp[feature_col].notna()].copy()
@@ -247,14 +167,6 @@ def select_representative_row(df, feature_col, target_value, stat_name):
 
 
 def save_representative_patches(df, feature_cols, output_dir, config, prefix="sample"):
-    """
-    Save representative patch images for each feature into:
-
-      {output_dir}/representative/{feature_name}/{stat_name}__patch{patch_idx}.png
-
-    Also save manifest CSV:
-      {output_dir}/representative/representative_manifest.csv
-    """
     rep_root = os.path.join(output_dir, "representative")
     ensure_dir(rep_root)
 
@@ -286,36 +198,40 @@ def save_representative_patches(df, feature_cols, output_dir, config, prefix="sa
             )
 
             if row is None:
-                manifest_rows.append({
-                    "feature_name": feature_col,
-                    "stat_name": stat_name,
-                    "target_value": target_value,
-                    "selected_value": np.nan,
-                    "abs_diff": np.nan,
-                    "patch_idx": np.nan,
-                    "barcode": "",
-                    "sample_id": row["sample_id"] if (row is not None and "sample_id" in row.index) else prefix,
-                    "source_path": "",
-                    "saved_path": "",
-                    "status": "no_valid_row",
-                })
+                manifest_rows.append(
+                    {
+                        "feature_name": feature_col,
+                        "stat_name": stat_name,
+                        "target_value": target_value,
+                        "selected_value": np.nan,
+                        "abs_diff": np.nan,
+                        "patch_idx": np.nan,
+                        "barcode": "",
+                        "sample_id": prefix,
+                        "source_path": "",
+                        "saved_path": "",
+                        "status": "no_valid_row",
+                    }
+                )
                 continue
 
             src_path = resolve_patch_path(row, preferred_col=preferred_image_col)
             if src_path is None or not os.path.exists(src_path):
-                manifest_rows.append({
-                    "feature_name": feature_col,
-                    "stat_name": stat_name,
-                    "target_value": float(target_value),
-                    "selected_value": float(row[feature_col]),
-                    "abs_diff": float(abs_diff),
-                    "patch_idx": row["patch_idx"] if "patch_idx" in row.index else np.nan,
-                    "barcode": row["barcode"] if "barcode" in row.index else "",
-                    "sample_id": row["sample_id"] if "sample_id" in row.index else prefix,
-                    "source_path": src_path if src_path is not None else "",
-                    "saved_path": "",
-                    "status": "missing_source_image",
-                })
+                manifest_rows.append(
+                    {
+                        "feature_name": feature_col,
+                        "stat_name": stat_name,
+                        "target_value": float(target_value),
+                        "selected_value": float(row[feature_col]),
+                        "abs_diff": float(abs_diff),
+                        "patch_idx": row["patch_idx"] if "patch_idx" in row.index else np.nan,
+                        "barcode": row["barcode"] if "barcode" in row.index else "",
+                        "sample_id": row["sample_id"] if "sample_id" in row.index else prefix,
+                        "source_path": src_path if src_path is not None else "",
+                        "saved_path": "",
+                        "status": "missing_source_image",
+                    }
+                )
                 continue
 
             patch_idx = row["patch_idx"] if "patch_idx" in row.index else "na"
@@ -331,19 +247,21 @@ def save_representative_patches(df, feature_cols, output_dir, config, prefix="sa
 
             shutil.copy2(src_path, dst_path)
 
-            manifest_rows.append({
-                "feature_name": feature_col,
-                "stat_name": stat_name,
-                "target_value": float(target_value),
-                "selected_value": float(row[feature_col]),
-                "abs_diff": float(abs_diff),
-                "patch_idx": patch_idx,
-                "barcode": barcode,
-                "sample_id": sample_id,
-                "source_path": src_path,
-                "saved_path": dst_path,
-                "status": "ok",
-            })
+            manifest_rows.append(
+                {
+                    "feature_name": feature_col,
+                    "stat_name": stat_name,
+                    "target_value": float(target_value),
+                    "selected_value": float(row[feature_col]),
+                    "abs_diff": float(abs_diff),
+                    "patch_idx": patch_idx,
+                    "barcode": barcode,
+                    "sample_id": sample_id,
+                    "source_path": src_path,
+                    "saved_path": dst_path,
+                    "status": "ok",
+                }
+            )
 
     manifest_df = pd.DataFrame(manifest_rows)
     manifest_csv = os.path.join(rep_root, "representative_manifest.csv")
@@ -353,17 +271,6 @@ def save_representative_patches(df, feature_cols, output_dir, config, prefix="sa
 
 
 def save_sample_feature_boxplot(df, feature_cols, output_dir, prefix):
-    """
-    Save one combined boxplot image per sample.
-
-    Output:
-      {output_dir}/boxplots/{prefix}_feature_boxplot.png
-
-    X-axis: feature names
-    Y-axis: feature value distribution
-    Overlay: representative patch positions for
-             min, q10, q25, q50, q75, q90, max
-    """
     if len(feature_cols) == 0:
         return None
 
@@ -406,12 +313,10 @@ def save_sample_feature_boxplot(df, feature_cols, output_dir, prefix):
             scatter_x.append(i)
             scatter_y.append(float(actual_value))
 
-    # feature 수에 비례해서 figure width 조절
     fig_width = max(16, len(feature_cols) * 0.22)
     fig_height = 6
 
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-
     ax.boxplot(
         data_for_boxplot,
         showfliers=False,
@@ -420,23 +325,14 @@ def save_sample_feature_boxplot(df, feature_cols, output_dir, prefix):
     )
 
     if len(scatter_x) > 0:
-        ax.scatter(
-            scatter_x,
-            scatter_y,
-            s=10,
-            alpha=0.9,
-        )
+        ax.scatter(scatter_x, scatter_y, s=10, alpha=0.9)
 
-    ax.set_title(
-        f"Radiomics Feature Distribution\nRepresentative patch position overlay",
-        fontsize=11
-    )
+    ax.set_title("Radiomics Feature Distribution\nRepresentative patch position overlay", fontsize=11)
     ax.set_xlabel("Feature")
     ax.set_ylabel("Feature value")
 
     ax.set_xticks(range(1, len(feature_cols) + 1))
     ax.set_xticklabels(feature_cols, rotation=90, fontsize=7)
-
     ax.grid(axis="y", linestyle="--", alpha=0.3)
 
     plt.tight_layout()
@@ -450,12 +346,6 @@ def save_sample_feature_boxplot(df, feature_cols, output_dir, prefix):
 
 
 def extract_feature_class(feature_name: str) -> str:
-    """
-    Examples:
-      original_firstorder_Mean -> firstorder
-      wavelet-HHH_glcm_Contrast -> glcm
-      log-sigma-3-0-mm-3D_glszm_ZoneEntropy -> glszm
-    """
     parts = str(feature_name).split("_")
     if len(parts) >= 2:
         return parts[1].lower()
@@ -463,12 +353,6 @@ def extract_feature_class(feature_name: str) -> str:
 
 
 def zscore_features(df, feature_cols):
-    """
-    Feature-wise z-score normalization:
-      z = (x - mean) / std
-
-    std == 0 or NaN 이면 0으로 처리
-    """
     out = df.copy()
 
     for col in feature_cols:
@@ -485,12 +369,6 @@ def zscore_features(df, feature_cols):
 
 
 def minmax_rescale_features(df, feature_cols):
-    """
-    Feature-wise [0,1] rescale:
-      x' = (x - min) / (max - min)
-
-    max == min or NaN 이면 0으로 처리
-    """
     out = df.copy()
 
     for col in feature_cols:
@@ -512,16 +390,8 @@ def save_sample_feature_boxplots_by_class(
     output_dir,
     prefix,
     file_tag="",
-    title_tag="raw"
+    title_tag="raw",
 ):
-    """
-    Save boxplot images split by feature class.
-
-    Examples:
-      {output_dir}/boxplots/{prefix}_firstorder_feature_boxplot.png
-      {output_dir}/boxplots/{prefix}_z-score_firstorder_feature_boxplot.png
-      {output_dir}/boxplots/{prefix}_z-score-01-rescale_firstorder_feature_boxplot.png
-    """
     if len(feature_cols) == 0:
         return []
 
@@ -565,7 +435,7 @@ def save_sample_feature_boxplots_by_class(
                 if row is None:
                     continue
 
-                actual_value = pd.to_numeric(row[feature_col], errors="coerce")
+                    actual_value = pd.to_numeric(row[feature_col], errors="coerce")
                 if pd.isna(actual_value):
                     continue
 
@@ -579,7 +449,6 @@ def save_sample_feature_boxplots_by_class(
         fig_height = 6
 
         fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-
         ax.boxplot(
             data_for_boxplot,
             showfliers=False,
@@ -588,23 +457,17 @@ def save_sample_feature_boxplots_by_class(
         )
 
         if len(scatter_x) > 0:
-            ax.scatter(
-                scatter_x,
-                scatter_y,
-                s=10,
-                alpha=0.9,
-            )
+            ax.scatter(scatter_x, scatter_y, s=10, alpha=0.9)
 
         ax.set_title(
             f"Radiomics Feature Distribution ({title_tag}, {feature_class})\nRepresentative patch position overlay",
-            fontsize=11
+            fontsize=11,
         )
         ax.set_xlabel("Feature")
         ax.set_ylabel("Feature value")
 
         ax.set_xticks(range(1, len(class_features) + 1))
         ax.set_xticklabels(class_features, rotation=90, fontsize=7)
-
         ax.grid(axis="y", linestyle="--", alpha=0.3)
 
         plt.tight_layout()
@@ -623,10 +486,6 @@ def save_sample_feature_boxplots_by_class(
 
     return saved_paths
 
-
-# =========================
-# Main logic
-# =========================
 
 def process_single_sample(sample_id, config):
     csv_path = find_feature_csv(config["input_root"], sample_id)
@@ -679,8 +538,7 @@ def process_single_sample(sample_id, config):
             output_dir=output_dir,
             prefix=sample_id,
         )
-        
-        # 1) raw
+
         save_sample_feature_boxplots_by_class(
             df=df,
             feature_cols=feature_cols,
@@ -690,7 +548,6 @@ def process_single_sample(sample_id, config):
             title_tag="raw",
         )
 
-        # 2) z-score
         df_z = zscore_features(df, feature_cols)
         save_sample_feature_boxplots_by_class(
             df=df_z,
@@ -701,7 +558,6 @@ def process_single_sample(sample_id, config):
             title_tag="z-score",
         )
 
-        # 3) z-score -> [0,1] rescale
         df_z01 = minmax_rescale_features(df_z, feature_cols)
         save_sample_feature_boxplots_by_class(
             df=df_z01,
@@ -759,97 +615,3 @@ def process_merged_samples(results, config):
             config=config,
             prefix="merged",
         )
-
-
-# =========================
-# Args
-# =========================
-
-def parse_args(args=None):
-    parser = argparse.ArgumentParser(description="Analyze saved radiomics feature CSV files.")
-
-    parser.add_argument("--config", type=str, default=None, help="Path to YAML config file")
-
-    parser.add_argument("--sample_ids", nargs="+", type=str, default=None)
-    parser.add_argument("--input_root", type=str, default=None)
-    parser.add_argument("--output_root", type=str, default=None)
-
-    parser.add_argument("--status_filter", type=str, default=None,
-                        help='Filter rows by status, e.g. "ok". Use None to disable filtering.')
-
-    parser.add_argument("--drop_diagnostic", type=str, default=None,
-                        help='true/false. Exclude columns starting with "diagnostics_"')
-
-    parser.add_argument("--save_per_sample", type=str, default=None,
-                        help="true/false")
-    parser.add_argument("--save_merged", type=str, default=None,
-                        help="true/false")
-
-    parser.add_argument("--save_representatives", type=str, default=None,
-                        help="true/false")
-    parser.add_argument("--representative_image_col", type=str, default=None,
-                        help='Preferred image column: color_path / gray_path / mask_path')
-    
-    parser.add_argument("--save_boxplot", type=str, default=None,
-                        help="true/false")
-
-    return parser.parse_args(args)
-
-
-def str_to_bool(v):
-    if v is None:
-        return None
-    if isinstance(v, bool):
-        return v
-    v = str(v).strip().lower()
-    if v in ("true", "1", "yes", "y"):
-        return True
-    if v in ("false", "0", "no", "n"):
-        return False
-    raise ValueError(f"Cannot parse boolean value from: {v}")
-
-
-def normalize_config_types(config):
-    config["drop_diagnostic"] = str_to_bool(config.get("drop_diagnostic"))
-    config["save_per_sample"] = str_to_bool(config.get("save_per_sample"))
-    config["save_merged"] = str_to_bool(config.get("save_merged"))
-    config["save_representatives"] = str_to_bool(config.get("save_representatives"))
-    config["save_boxplot"] = str_to_bool(config.get("save_boxplot"))
-
-    if config.get("status_filter") in ("None", "none", ""):
-        config["status_filter"] = None
-
-    return config
-
-
-# =========================
-# Entry point
-# =========================
-
-def main(args=None):
-    cli_args = parse_args(args)
-
-    defaults = get_default_config()
-    yaml_config = load_yaml_config(cli_args.config) if cli_args.config else {}
-    config = merge_config(defaults, yaml_config, cli_args)
-    config = normalize_config_types(config)
-
-    print("Configuration:")
-    for k, v in config.items():
-        print(f"  {k}: {v}")
-
-    os.makedirs(config["output_root"], exist_ok=True)
-
-    results = []
-    for sample_id in config["sample_ids"]:
-        result = process_single_sample(sample_id, config)
-        results.append(result)
-
-    if config["save_merged"]:
-        process_merged_samples(results, config)
-
-    print("[INFO] Done.")
-
-
-if __name__ == "__main__":
-    main()
