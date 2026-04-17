@@ -621,7 +621,14 @@ def save_overlay_png(
 
     ax.axis("off")
     plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.savefig(
+        save_path,
+        dpi=150,
+        bbox_inches="tight",
+        facecolor="white",
+        edgecolor="white",
+        transparent=False,
+    )
     plt.close(fig)
 
 
@@ -767,27 +774,19 @@ def segment_h5_patches_with_cellvit(
             print("[DEBUG] gdf columns:", list(gdfs[0].columns))
             print(gdfs[0].head())
 
-        with ThreadPoolExecutor(max_workers=max(1, postprocess_threads)) as ex:
-            futures = []
-            for img, gdf, patch_idx, barcode, coord in zip(images, gdfs, patch_idxs, barcodes, coords):
-                futures.append(
-                    ex.submit(
-                        _postprocess_one_patch,
-                        img,
-                        gdf,
-                        patch_idx,
-                        barcode,
-                        coord,
-                        overlay_dir,
-                        geojson_dir,
-                        use_class_color,
-                    )
-                )
-
-            for fu in futures:
-                rows, summary_row = fu.result()
-                all_rows.extend(rows)
-                summary_rows.append(summary_row)
+        for img, gdf, patch_idx, barcode, coord in zip(images, gdfs, patch_idxs, barcodes, coords):
+            rows, summary_row = _postprocess_one_patch(
+                img,
+                gdf,
+                patch_idx,
+                barcode,
+                coord,
+                overlay_dir,
+                geojson_dir,
+                use_class_color,
+            )
+            all_rows.extend(rows)
+            summary_rows.append(summary_row)
 
     if all_rows:
         merged_gdf = gpd.GeoDataFrame(all_rows, geometry="geometry", crs=None)
