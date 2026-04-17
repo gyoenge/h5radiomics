@@ -72,6 +72,7 @@ Install `torch` and `torchvision`, matching with your cuda environment:
 ```bash
 # example 
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install "numpy<2.0.0,>=1.24" # for numpy degrading 
 ```
 
 Then: 
