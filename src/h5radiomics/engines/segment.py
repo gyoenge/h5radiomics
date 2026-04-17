@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+from tqdm import tqdm
 from matplotlib.collections import PatchCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon as MplPolygon
@@ -756,23 +757,15 @@ def segment_h5_patches_with_cellvit(
     all_rows: List[Dict[str, Any]] = []
     summary_rows: List[Dict[str, Any]] = []
 
+    pbar = tqdm(total=len(dataset), desc="Segmenting patches")
+
     for batch_idx, batch in enumerate(loader):
         images = batch["images"]
         patch_idxs = batch["patch_idx"]
         barcodes = batch["barcodes"]
         coords = batch["coords"]
 
-        print(
-            f"[INFO] batch {batch_idx + 1}: "
-            f"patches={patch_idxs[0]}..{patch_idxs[-1]} "
-            f"(batch_size={len(images)})"
-        )
-
         gdfs = predictor.predict_batch_to_gdfs(images)
-
-        if predictor.verbose and len(gdfs) > 0:
-            print("[DEBUG] gdf columns:", list(gdfs[0].columns))
-            print(gdfs[0].head())
 
         for img, gdf, patch_idx, barcode, coord in zip(images, gdfs, patch_idxs, barcodes, coords):
             rows, summary_row = _postprocess_one_patch(
@@ -787,6 +780,10 @@ def segment_h5_patches_with_cellvit(
             )
             all_rows.extend(rows)
             summary_rows.append(summary_row)
+
+            pbar.update(1)   
+
+    pbar.close()
 
     if all_rows:
         merged_gdf = gpd.GeoDataFrame(all_rows, geometry="geometry", crs=None)

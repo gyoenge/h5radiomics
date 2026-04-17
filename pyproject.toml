@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "h5radiomics"
-version = "0.1.0"
+version = "0.1.1"
 description = "Pipeline for radiomics feature extraction and analysis from H5-based WSI patches. Currently extracts intensity+texture based features only, and separately outputs cell segmentations."
 requires-python = ">=3.9"
 dependencies = [

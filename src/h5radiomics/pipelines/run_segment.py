@@ -90,6 +90,14 @@ def main(args=None):
     model_path = os.path.join(config["model_dir"], config["model_name"])
     verify_or_download_model(model_path, config["model_name"])
 
+    shared_predictor = CellViTInferenceAdapter(
+        model_path=model_path,
+        model_name=infer_cellvit_model_type(os.path.basename(model_path)),
+        output_dir=config["output_dir"],   # 임시 runtime 용
+        device=config["device"],
+        verbose=config["verbose"],
+    )
+
     for sample_id in config["sample_ids"]:
         h5_path = os.path.join(config["input_dir"], f"{sample_id}.h5")
         if not os.path.exists(h5_path):
@@ -98,14 +106,6 @@ def main(args=None):
 
         sample_output_dir = get_cellvitseg_dir(config["output_dir"], sample_id)
         os.makedirs(sample_output_dir, exist_ok=True)
-
-        predictor = CellViTInferenceAdapter(
-            model_path=model_path,
-            model_name=infer_cellvit_model_type(os.path.basename(model_path)),
-            output_dir=sample_output_dir,
-            device=config["device"],
-            verbose=config["verbose"],
-        )
 
         print("=" * 60)
         print(f"[INFO] Processing sample: {sample_id}")
@@ -124,9 +124,8 @@ def main(args=None):
             save_geojson_per_patch=config["save_geojson_per_patch"],
             device=config["device"],
             postprocess_threads=config["postprocess_threads"],
-            predictor=predictor,
+            predictor=shared_predictor,
         )
-
 
 if __name__ == "__main__":
     main()
