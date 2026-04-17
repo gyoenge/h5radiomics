@@ -1,16 +1,15 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=61,<66", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "h5radiomics"
 version = "0.1.0"
-description = "Pipeline for radiomics feature extraction and analysis from H5-based WSI patches."
+description = "Pipeline for radiomics feature extraction and analysis from H5-based WSI patches. Currently extracts intensity+texture based features only, and separately outputs cell segmentations."
 requires-python = ">=3.9"
-
 dependencies = [
-    "numpy",
-    "pandas",
+    "numpy>=1.24,<2.0.0",
+    "pandas>=1.5",
     "pyyaml",
     "h5py",
     "Pillow",
@@ -20,10 +19,9 @@ dependencies = [
     "tqdm",
     "shapely",
     "geopandas",
-    "torch",
-    "torchvision",
     "opencv-python",
     "gdown",
+    "pyarrow",
 ]
 
 [tool.setuptools]

@@ -62,10 +62,16 @@ Each `.h5` file should contain:
 
 ## Installation
 
+Firstly, install `torch` and `torchvision`, matching with your cuda environment: 
 ```bash
-pip install -r requirements.txt
-# or 
-pip install -e .
+# example 
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
+
+Then: 
+```bash
+# inside the hest-radiomics/ directory 
+pip install -e .  
 ```
 
 ---
