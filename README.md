@@ -62,7 +62,13 @@ Each `.h5` file should contain:
 
 ## Installation
 
-Firstly, install `torch` and `torchvision`, matching with your cuda environment: 
+Firstly, create and activate conda environment: 
+```bash
+conda create -n h5radiomics python=3.9
+conda activate h5radiomics 
+```
+
+Install `torch` and `torchvision`, matching with your cuda environment: 
 ```bash
 # example 
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
@@ -72,6 +78,13 @@ Then:
 ```bash
 # inside the hest-radiomics/ directory 
 pip install -e .  
+```
+
+We need `cellvit` module installation for `segment` engine: 
+```bash
+conda install -c conda-forge openslide
+pip install openslide-python
+pip install cellvit
 ```
 
 ---
