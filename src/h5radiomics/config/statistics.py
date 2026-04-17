@@ -20,3 +20,4 @@ def get_statistics_default_config() -> dict:
     config = get_common_default_config()
     config.update(copy.deepcopy(DEFAULT_CONFIG_STATISTICS))
     return config
+

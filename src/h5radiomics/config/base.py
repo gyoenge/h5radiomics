@@ -12,3 +12,4 @@ DEFAULT_CONFIG_COMMON = {
 
 def get_common_default_config() -> dict:
     return copy.deepcopy(DEFAULT_CONFIG_COMMON)
+

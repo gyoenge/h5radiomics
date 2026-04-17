@@ -27,3 +27,4 @@ def get_extract_default_config() -> dict:
     config = get_common_default_config()
     config.update(copy.deepcopy(DEFAULT_CONFIG_EXTRACT))
     return config
+
