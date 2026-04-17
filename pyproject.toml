@@ -14,7 +14,7 @@ dependencies = [
     "h5py",
     "Pillow",
     "SimpleITK",
-    "pyradiomics",
+    "pyradiomics==3.0.1",
     "matplotlib",
     "tqdm",
     "shapely",

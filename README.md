@@ -78,7 +78,7 @@ pip install "numpy<2.0.0,>=1.24" # for numpy degrading
 Then: 
 ```bash
 # inside the hest-radiomics/ directory 
-pip install -e .  
+pip install -e . --no-build-isolation
 ```
 
 We need `cellvit` module installation for `segment` engine: 
