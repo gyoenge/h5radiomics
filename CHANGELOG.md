@@ -99,3 +99,20 @@ python -m h5radiomics.pipelines.run_extract \
   --celltype_mode single \
   --target_cell_type neoplastic
 ```
+
+---
+
+### 모드에 따른 feature 추출 
+
+- mask_source == "threshold"
+  - 기존처럼 patch-level intensity/texture radiomics만 추출
+
+- mask_source == "cellseg"
+  - patch 1개당 row 1개
+  - 아래를 모두 한 row에 넣음
+    - patch-level intensity/texture
+    - cellseg merged(all cells) intensity/texture
+    - class별 cellseg intensity/texture
+    - morphology(shape2D) per-cell 추출 후 first-order aggregation
+    - cell-type count / ratio features
+

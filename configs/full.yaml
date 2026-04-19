@@ -26,12 +26,12 @@ classes:
 
 filters:
   - Original
-  - Wavelet
-  - LoG
-  - Square
-  - SquareRoot
-  - Logarithm
-  - Exponential
+  # - Wavelet
+  # - LoG
+  # - Square
+  # - SquareRoot
+  # - Logarithm
+  # - Exponential
 
 image_type_settings:
   LoG:
