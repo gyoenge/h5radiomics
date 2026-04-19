@@ -232,6 +232,8 @@ output_test/*
 # output files
 outputs/
 outputs/* 
+outputs*/
+outputs*/* 
 
 # model files
 models/

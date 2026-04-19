@@ -43,7 +43,58 @@ def parse_args(args=None):
 
     parser.add_argument("--num_workers", type=int, default=None)
 
+    # new: cellseg-based extraction options
+    parser.add_argument(
+        "--mask_source",
+        type=str,
+        default=None,
+        choices=["threshold", "cellseg"],
+        help="Mask source for radiomics extraction",
+    )
+    parser.add_argument(
+        "--cellseg_path",
+        type=str,
+        default=None,
+        help="Optional explicit path to cellseg parquet. If omitted and mask_source=cellseg, "
+             "use {output_dir}/{sample_id}/cellvitseg/cellseg.parquet",
+    )
+    parser.add_argument(
+        "--celltype_mode",
+        type=str,
+        default=None,
+        choices=["merged", "per_class", "single"],
+        help="How to build masks from cellseg result",
+    )
+    parser.add_argument(
+        "--target_cell_type",
+        type=str,
+        default=None,
+        help="Target cell type name when celltype_mode=single",
+    )
+
     return parser.parse_args(args)
+
+
+def resolve_cellseg_path(config: dict, sample_id: str) -> str | None:
+    """
+    Priority:
+    1. config['cellseg_path'] if explicitly provided
+    2. default sample-wise path under output_dir
+       {output_dir}/{sample_id}/cellvitseg/cellseg.parquet
+    """
+    if config.get("mask_source", "threshold") != "cellseg":
+        return None
+
+    explicit_path = config.get("cellseg_path")
+    if explicit_path:
+        return explicit_path
+
+    return os.path.join(
+        config["output_dir"],
+        sample_id,
+        "cellvitseg",
+        "cellseg.parquet",
+    )
 
 
 def main(args=None):
@@ -63,6 +114,12 @@ def main(args=None):
     if cli_args.no_save_patches:
         config["save_patches"] = False
 
+    # backward-compatible defaults
+    config.setdefault("mask_source", "threshold")
+    config.setdefault("celltype_mode", "merged")
+    config.setdefault("target_cell_type", None)
+    config.setdefault("cellseg_path", None)
+
     print("Configuration:")
     for k, v in config.items():
         print(f"  {k}: {v}")
@@ -81,6 +138,13 @@ def main(args=None):
             print(f"[ERROR] HDF5 file not found: {h5_path}")
             continue
 
+        cellseg_path = resolve_cellseg_path(config, sample_id)
+        if config["mask_source"] == "cellseg":
+            print(f"[INFO] sample_id={sample_id} cellseg_path={cellseg_path}")
+            if not cellseg_path or not os.path.exists(cellseg_path):
+                print(f"[ERROR] cellseg parquet not found: {cellseg_path}")
+                continue
+
         extractor = build_radiomics_extractor(
             classes=config["classes"],
             filters=config["filters"],
@@ -92,18 +156,25 @@ def main(args=None):
             h5_path=h5_path,
             output_dir=config["output_dir"],
             sample_id=sample_id,
-            extractor=extractor if config["num_workers"] <= 1 else None,
+            extractor=extractor if (config["num_workers"] is None or config["num_workers"] <= 1) else None,
             label=config["label"],
             save_patches=config["save_patches"],
             num_workers=config["num_workers"],
             classes=config["classes"],
             filters=config["filters"],
             image_type_settings=config.get("image_type_settings", {}),
+            mask_source=config["mask_source"],
+            cellseg_path=cellseg_path,
+            celltype_mode=config["celltype_mode"],
+            target_cell_type=config["target_cell_type"],
         )
 
         df = pd.DataFrame(result["rows"])
-        print(df["status"].value_counts(dropna=False).head(20))
-        print(df[df["status"] != "ok"]["status"].head(20).tolist())
+
+        if "status" in df.columns:
+            print(df["status"].value_counts(dropna=False).head(20))
+            if (df["status"] != "ok").any():
+                print(df[df["status"] != "ok"]["status"].head(20).tolist())
 
         csv_path = get_raw_features_csv_path(config["output_dir"], sample_id)
         parquet_path = get_raw_features_parquet_path(config["output_dir"], sample_id)
@@ -137,6 +208,10 @@ def main(args=None):
                 "classes": config["classes"],
                 "filters": config["filters"],
                 "image_type_settings": config.get("image_type_settings", {}),
+                "mask_source": config["mask_source"],
+                "celltype_mode": config["celltype_mode"],
+                "target_cell_type": config["target_cell_type"],
+                "cellseg_path": cellseg_path,
             }
 
             with open(processing_config_json_path, "w", encoding="utf-8") as f:

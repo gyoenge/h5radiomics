@@ -1,15 +1,15 @@
-# config.yaml
-
 sample_ids:
-  - TENX99  # 25080 patches -> 20761 patches 
-  - TENX95  # 11845 patches -> 7760 patches 
-  - NCBI785 # 4180 patches -> 4010 patches
-  - NCBI783 # 3869 patches -> 3005 patches
+  - TENX99
+  - TENX95
+  - NCBI785
+  - NCBI783
 
-h5_dir: /root/workspace/h5radiomics/h5
-output_root: /root/workspace/h5radiomics/outputs
+input_dir: /root/workspace/hest-radiomics/data/h5
+output_dir: /root/workspace/hest-radiomics/data/outputs
+
 label: 255
 save_patches: true
+num_workers: 8
 
 classes:
   - firstorder
@@ -31,6 +31,15 @@ filters:
 image_type_settings:
   LoG:
     sigma: [1.0, 2.0, 3.0]
+
+# cellseg-based extraction
+mask_source: cellseg          # threshold | cellseg
+celltype_mode: per_class      # merged | per_class | single
+target_cell_type: null        # used only when celltype_mode=single
+
+# if null, run_extract.py should resolve:
+# {output_dir}/{sample_id}/cellvitseg/cellseg.parquet
+cellseg_path: null
 
 processing:
   lower_q: 0.01
