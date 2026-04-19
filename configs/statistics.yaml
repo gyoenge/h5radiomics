@@ -4,8 +4,8 @@ sample_ids:
   - NCBI783
   - TENX99
 
-input_root: /root/workspace/impl/h5radiomics/outputs
-output_root: /root/workspace/impl/h5radiomics/statistics
+input_root: /root/workspace/hest-radiomics/data/outputs
+output_root: /root/workspace/hest-radiomics/data/outputs/statistics
 
 status_filter: ok
 drop_diagnostic: true

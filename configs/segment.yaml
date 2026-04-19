@@ -5,10 +5,10 @@ sample_ids:
   - NCBI783
   - NCBI785
 
-input_dir: /root/workspace/h5radiomics/h5
-output_dir: /root/workspace/h5radiomics/outputs/cellvit_patch_seg
+input_dir: /root/workspace/hest-radiomics/data/h5
+output_dir: /root/workspace/hest-radiomics/data/outputs/cellvit_patch_seg
 
-model_dir: /root/workspace/h5radiomics/models
+model_dir: /root/workspace/hest-radiomics/data/models
 model_name: CellViT-SAM-H-x20.pth
 
 batch_size: 8
