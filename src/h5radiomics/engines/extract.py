@@ -373,30 +373,78 @@ def execute_radiomics_on_mask(
     return clean_radiomics_result(features)
 
 
-def execute_firstorder_aggregation(values: List[float], label: int = 1) -> Dict[str, float]:
-    values = [float(v) for v in values if pd.notna(v)]
-    if len(values) == 0:
+def execute_firstorder_aggregation(values: List[float]) -> Dict[str, float]:
+    """
+    Safe manual first-order aggregation for morphology feature vectors.
+    Avoid PyRadiomics firstorder here because it may emit RuntimeWarning
+    for short / degenerate vectors.
+    """
+    s = pd.to_numeric(pd.Series(values), errors="coerce")
+    s = s.replace([np.inf, -np.inf], np.nan).dropna()
+
+    if len(s) == 0:
         return {}
 
-    arr = np.asarray(values, dtype=np.float32).reshape(1, -1)
-    mask = np.ones_like(arr, dtype=np.uint8) * label
+    arr = s.to_numpy(dtype=np.float64)
+    n = len(arr)
 
-    image_sitk = sitk.GetImageFromArray(arr)
-    mask_sitk = sitk.GetImageFromArray(mask)
+    mean_val = float(np.mean(arr))
+    median_val = float(np.median(arr))
+    min_val = float(np.min(arr))
+    max_val = float(np.max(arr))
+    range_val = float(max_val - min_val)
+    var_val = float(np.var(arr, ddof=0))
+    std_val = float(np.std(arr, ddof=0))
+    p10_val = float(np.percentile(arr, 10))
+    p25_val = float(np.percentile(arr, 25))
+    p75_val = float(np.percentile(arr, 75))
+    p90_val = float(np.percentile(arr, 90))
+    iqr_val = float(p75_val - p25_val)
 
-    fo = firstorder.RadiomicsFirstOrder(image_sitk, mask_sitk, label=label)
-    fo.enableAllFeatures()
-    result = fo.execute()
+    # robust skewness / kurtosis
+    if std_val == 0.0:
+        skew_val = 0.0
+        kurt_val = 0.0
+    else:
+        z = (arr - mean_val) / std_val
+        skew_val = float(np.mean(z ** 3))
+        kurt_val = float(np.mean(z ** 4) - 3.0)
 
-    out = {}
-    for k, v in result.items():
-        if str(k).startswith("diagnostics_"):
-            continue
-        try:
-            out[str(k)] = float(v)
-        except Exception:
-            continue
-    return out
+    # entropy on histogram
+    if n <= 1 or min_val == max_val:
+        entropy_val = 0.0
+    else:
+        hist, _ = np.histogram(arr, bins=min(16, max(2, n)))
+        prob = hist.astype(np.float64)
+        prob = prob[prob > 0]
+        prob = prob / prob.sum()
+        entropy_val = float(-np.sum(prob * np.log2(prob)))
+
+    mad_val = float(np.mean(np.abs(arr - mean_val)))
+    energy_val = float(np.sum(arr ** 2))
+    rms_val = float(np.sqrt(np.mean(arr ** 2)))
+
+    return {
+        "count": float(n),
+        "mean": mean_val,
+        "median": median_val,
+        "minimum": min_val,
+        "maximum": max_val,
+        "range": range_val,
+        "variance": var_val,
+        "standarddeviation": std_val,
+        "p10": p10_val,
+        "p25": p25_val,
+        "p75": p75_val,
+        "p90": p90_val,
+        "iqr": iqr_val,
+        "meanabsolutedeviation": mad_val,
+        "skewness": skew_val,
+        "kurtosis": kurt_val,
+        "entropy": entropy_val,
+        "energy": energy_val,
+        "rootmeansquared": rms_val,
+    }
 
 
 def extract_patch_level_radiomics(
@@ -535,7 +583,8 @@ def extract_morphology_aggregates(
     # total cell morphology aggregates
     for col in morph_cols:
         vals = pd.to_numeric(cell_df[col], errors="coerce").dropna().tolist()
-        agg = execute_firstorder_aggregation(vals, label=1)
+        # agg = execute_firstorder_aggregation(vals, label=1)
+        agg = execute_firstorder_aggregation(vals)
         base_name = col.lower().replace("original_shape2d_", "")
         base_name = base_name.replace("original_shape2_d_", "")
         for stat_name, stat_val in agg.items():
@@ -546,7 +595,8 @@ def extract_morphology_aggregates(
         safe_class = str(class_name).strip().lower().replace(" ", "_")
         for col in morph_cols:
             vals = pd.to_numeric(sub[col], errors="coerce").dropna().tolist()
-            agg = execute_firstorder_aggregation(vals, label=1)
+            # agg = execute_firstorder_aggregation(vals, label=1)
+            agg = execute_firstorder_aggregation(vals)
             base_name = col.lower().replace("original_shape2d_", "")
             base_name = base_name.replace("original_shape2_d_", "")
             for stat_name, stat_val in agg.items():
