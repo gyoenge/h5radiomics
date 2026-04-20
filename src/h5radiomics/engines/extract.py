@@ -4,6 +4,7 @@ import logging
 import math
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional, Any
 
 import geopandas as gpd
@@ -12,7 +13,7 @@ import numpy as np
 import pandas as pd
 import SimpleITK as sitk
 from PIL import Image, ImageDraw
-from radiomics import featureextractor, firstorder, shape2D
+from radiomics import featureextractor
 from shapely import affinity
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
 from tqdm import tqdm
@@ -43,6 +44,75 @@ KNOWN_CELL_CLASSES = [
     "background",
     "unknown",
 ]
+
+RADIOMICS_IMAGE_PREFIXES = (
+    "original_",
+    "wavelet-",
+    "log-sigma-",
+    "square_",
+    "squareroot_",
+    "logarithm_",
+    "exponential_",
+)
+
+_WORKER_EXTRACTOR_CACHE: Dict[Any, Any] = {}
+_WORKER_SHAPE_EXTRACTOR_CACHE: Dict[Any, Any] = {}
+
+
+@dataclass
+class PatchData:
+    patch_idx: int
+    color_patch: np.ndarray
+    gray_patch: np.ndarray
+    coords: Optional[Any]
+    barcode: Optional[str]
+    base_filename: str
+
+
+# ------------------------------------------------------------------------------
+# naming / small helpers
+# ------------------------------------------------------------------------------
+
+def normalize_class_name(class_name: Any) -> str:
+    return str(class_name).strip().lower().replace(" ", "_")
+
+
+def strip_shape2d_prefix(name: str) -> str:
+    base_name = name.lower().replace("original_shape2d_", "")
+    base_name = base_name.replace("original_shape2_d_", "")
+    return base_name
+
+
+def make_feature_prefix(*parts: str) -> str:
+    cleaned = [normalize_class_name(p) for p in parts if p]
+    return "_".join(cleaned) + "_"
+
+
+def make_error_row(patch_idx: int, message: str) -> Dict[str, Any]:
+    return {
+        "patch_idx": patch_idx,
+        "barcode": None,
+        "color_path": "",
+        "gray_path": "",
+        "mask_path": "",
+        "x": None,
+        "y": None,
+        "status": f"error: {message}",
+    }
+
+
+def update_status_once(row: Dict[str, Any], status: str) -> None:
+    if row.get("status") == "ok":
+        row["status"] = status
+
+
+def safe_update_features(row: Dict[str, Any], fn, error_status: str) -> None:
+    try:
+        feats = fn()
+        if feats:
+            row.update(feats)
+    except Exception as e:
+        update_status_once(row, f"{error_status}: {repr(e)}")
 
 
 # ------------------------------------------------------------------------------
@@ -111,6 +181,30 @@ def build_shape2d_extractor(label=255):
     extractor.enableFeatureClassByName("shape2D")
     extractor.enableImageTypeByName("Original")
     return extractor
+
+
+def get_worker_radiomics_extractor(classes, filters, label, image_type_settings):
+    key = (
+        tuple(classes or []),
+        tuple(filters or []),
+        label,
+        repr(image_type_settings or {}),
+    )
+    if key not in _WORKER_EXTRACTOR_CACHE:
+        _WORKER_EXTRACTOR_CACHE[key] = build_radiomics_extractor(
+            classes=classes,
+            filters=filters,
+            label=label,
+            image_type_settings=image_type_settings,
+        )
+    return _WORKER_EXTRACTOR_CACHE[key]
+
+
+def get_worker_shape2d_extractor(label):
+    key = ("shape2d", label)
+    if key not in _WORKER_SHAPE_EXTRACTOR_CACHE:
+        _WORKER_SHAPE_EXTRACTOR_CACHE[key] = build_shape2d_extractor(label=label)
+    return _WORKER_SHAPE_EXTRACTOR_CACHE[key]
 
 
 # ------------------------------------------------------------------------------
@@ -267,7 +361,7 @@ def align_local_mask_to_crop(
 
 
 # ------------------------------------------------------------------------------
-# save helpers
+# save helpers (I/O)
 # ------------------------------------------------------------------------------
 
 def save_patch_images_once(
@@ -327,20 +421,78 @@ def save_region_mask_images(
 
 
 # ------------------------------------------------------------------------------
+# patch loading / row builders
+# ------------------------------------------------------------------------------
+
+def load_patch_data(
+    f,
+    img_key,
+    coords_key,
+    barcodes_key,
+    patch_idx: int,
+) -> PatchData:
+    img = f[img_key][patch_idx]
+
+    if img.ndim == 3 and img.shape[2] == 3:
+        color_patch = img.astype(np.uint8)
+    elif img.ndim == 3 and img.shape[0] == 3:
+        color_patch = np.transpose(img, (1, 2, 0)).astype(np.uint8)
+    else:
+        raise ValueError(f"Unexpected image shape: {img.shape} for patch index {patch_idx}")
+
+    gray_patch = np.array(Image.fromarray(color_patch).convert("L"))
+    coords = f[coords_key][patch_idx] if coords_key else None
+    barcode = f[barcodes_key][patch_idx] if barcodes_key else None
+    barcode = to_str_barcode(barcode) if barcode is not None else None
+    base_filename = make_base_name(patch_idx, barcode)
+
+    return PatchData(
+        patch_idx=patch_idx,
+        color_patch=color_patch,
+        gray_patch=gray_patch,
+        coords=coords,
+        barcode=barcode,
+        base_filename=base_filename,
+    )
+
+
+def build_patch_row_base(
+    patch: PatchData,
+    output_dir: str,
+    sample_id: str,
+    save_patches: bool,
+) -> Dict[str, Any]:
+    color_path = ""
+    gray_path = ""
+
+    if save_patches:
+        color_path, gray_path = save_patch_images_once(
+            color_patch=patch.color_patch,
+            gray_patch=patch.gray_patch,
+            output_dir=output_dir,
+            sample_id=sample_id,
+            base_filename=patch.base_filename,
+        )
+
+    return {
+        "patch_idx": patch.patch_idx,
+        "barcode": patch.barcode,
+        "color_path": color_path,
+        "gray_path": gray_path,
+        "mask_path": "",
+        "x": patch.coords[0] if patch.coords is not None else None,
+        "y": patch.coords[1] if patch.coords is not None else None,
+        "status": "ok",
+    }
+
+
+# ------------------------------------------------------------------------------
 # radiomics execution helpers
 # ------------------------------------------------------------------------------
 
 def is_radiomics_feature_key(k: str) -> bool:
     k = k.lower()
-    return (
-        k.startswith("original_")
-        or k.startswith("wavelet-")
-        or k.startswith("log-sigma-")
-        or k.startswith("square_")
-        or k.startswith("squareroot_")
-        or k.startswith("logarithm_")
-        or k.startswith("exponential_")
-    )
+    return any(k.startswith(prefix) for prefix in RADIOMICS_IMAGE_PREFIXES)
 
 
 def clean_radiomics_result(feature_dict: Dict[str, Any]) -> Dict[str, float]:
@@ -401,7 +553,6 @@ def execute_firstorder_aggregation(values: List[float]) -> Dict[str, float]:
     p90_val = float(np.percentile(arr, 90))
     iqr_val = float(p75_val - p25_val)
 
-    # robust skewness / kurtosis
     if std_val == 0.0:
         skew_val = 0.0
         kurt_val = 0.0
@@ -410,7 +561,6 @@ def execute_firstorder_aggregation(values: List[float]) -> Dict[str, float]:
         skew_val = float(np.mean(z ** 3))
         kurt_val = float(np.mean(z ** 4) - 3.0)
 
-    # entropy on histogram
     if n <= 1 or min_val == max_val:
         entropy_val = 0.0
     else:
@@ -447,6 +597,10 @@ def execute_firstorder_aggregation(values: List[float]) -> Dict[str, float]:
     }
 
 
+# ------------------------------------------------------------------------------
+# feature extraction
+# ------------------------------------------------------------------------------
+
 def extract_patch_level_radiomics(
     gray_patch: np.ndarray,
     extractor,
@@ -473,27 +627,25 @@ def extract_cellseg_level_radiomics(
     if len(patch_cellseg) == 0:
         return out
 
-    # merged all-cell ROI
     mask_all = rasterize_geometries_to_mask(
         patch_cellseg.geometry.tolist(),
         image_shape=gray_patch.shape,
         label=label,
     )
     all_feats = execute_radiomics_on_mask(gray_patch, mask_all, extractor)
-    out.update(add_prefix_to_keys(all_feats, "cellseg_all_"))
+    out.update(add_prefix_to_keys(all_feats, make_feature_prefix("cellseg", "all")))
 
-    # per-class ROI
     for class_name, sub in patch_cellseg.groupby("class_name"):
         if len(sub) == 0:
             continue
+
         mask_cls = rasterize_geometries_to_mask(
             sub.geometry.tolist(),
             image_shape=gray_patch.shape,
             label=label,
         )
         cls_feats = execute_radiomics_on_mask(gray_patch, mask_cls, extractor)
-        safe_name = str(class_name).strip().lower().replace(" ", "_")
-        out.update(add_prefix_to_keys(cls_feats, f"cellseg_{safe_name}_"))
+        out.update(add_prefix_to_keys(cls_feats, make_feature_prefix("cellseg", class_name)))
 
     return out
 
@@ -538,6 +690,7 @@ def extract_morphology_aggregates(
     gray_patch: np.ndarray,
     patch_cellseg: gpd.GeoDataFrame,
     label: int = 255,
+    shape_extractor=None,
 ) -> Dict[str, float]:
     """
     1) per-cell shape2D extraction
@@ -554,12 +707,13 @@ def extract_morphology_aggregates(
     if len(patch_cellseg) == 0:
         return out
 
-    shape_extractor = build_shape2d_extractor(label=label)
+    if shape_extractor is None:
+        shape_extractor = build_shape2d_extractor(label=label)
 
     per_cell_rows = []
     for _, r in patch_cellseg.iterrows():
         geom = r.geometry
-        class_name = str(r.get("class_name", "unknown")).strip().lower().replace(" ", "_")
+        class_name = normalize_class_name(r.get("class_name", "unknown"))
         try:
             feats = extract_single_cell_shape_features(
                 gray_patch=gray_patch,
@@ -567,38 +721,32 @@ def extract_morphology_aggregates(
                 shape_extractor=shape_extractor,
                 label=label,
             )
-            if len(feats) == 0:
+            if not feats:
                 continue
             feats["class_name"] = class_name
             per_cell_rows.append(feats)
         except Exception:
             continue
 
-    if len(per_cell_rows) == 0:
+    if not per_cell_rows:
         return out
 
     cell_df = pd.DataFrame(per_cell_rows)
     morph_cols = [c for c in cell_df.columns if c != "class_name"]
 
-    # total cell morphology aggregates
     for col in morph_cols:
         vals = pd.to_numeric(cell_df[col], errors="coerce").dropna().tolist()
-        # agg = execute_firstorder_aggregation(vals, label=1)
         agg = execute_firstorder_aggregation(vals)
-        base_name = col.lower().replace("original_shape2d_", "")
-        base_name = base_name.replace("original_shape2_d_", "")
+        base_name = strip_shape2d_prefix(col)
         for stat_name, stat_val in agg.items():
             out[f"morph_{base_name}_{stat_name.lower()}"] = stat_val
 
-    # per-class morphology aggregates
     for class_name, sub in cell_df.groupby("class_name"):
-        safe_class = str(class_name).strip().lower().replace(" ", "_")
+        safe_class = normalize_class_name(class_name)
         for col in morph_cols:
             vals = pd.to_numeric(sub[col], errors="coerce").dropna().tolist()
-            # agg = execute_firstorder_aggregation(vals, label=1)
             agg = execute_firstorder_aggregation(vals)
-            base_name = col.lower().replace("original_shape2d_", "")
-            base_name = base_name.replace("original_shape2_d_", "")
+            base_name = strip_shape2d_prefix(col)
             for stat_name, stat_val in agg.items():
                 out[f"morph_{safe_class}_{base_name}_{stat_name.lower()}"] = stat_val
 
@@ -647,8 +795,128 @@ def extract_cell_type_distribution(
 
 
 # ------------------------------------------------------------------------------
-# per-patch processing
+# patch processors
 # ------------------------------------------------------------------------------
+
+def get_patch_cellseg(
+    cellseg_df: gpd.GeoDataFrame,
+    patch_idx: int,
+) -> gpd.GeoDataFrame:
+    patch_cellseg = cellseg_df[cellseg_df["patch_idx"] == patch_idx].copy()
+    patch_cellseg = patch_cellseg[patch_cellseg.geometry.notnull()].copy()
+
+    if len(patch_cellseg) > 0:
+        patch_cellseg["class_name"] = patch_cellseg["class_name"].map(normalize_class_name)
+
+    return patch_cellseg
+
+
+def process_threshold_patch(
+    patch: PatchData,
+    row: Dict[str, Any],
+    extractor,
+    output_dir: str,
+    sample_id: str,
+    label: int,
+    save_patches: bool,
+) -> Dict[str, Any]:
+    patch_mask = build_threshold_mask(patch.gray_patch, label=label)
+    row["patch_mask_area"] = int(np.count_nonzero(patch_mask > 0))
+
+    if save_patches:
+        row["mask_path"] = save_region_mask_images(
+            color_patch=patch.color_patch,
+            gray_patch=patch.gray_patch,
+            mask_patch=patch_mask,
+            output_dir=output_dir,
+            sample_id=sample_id,
+            mask_filename=f"{patch.base_filename}__threshold",
+        )
+
+    if row["patch_mask_area"] < 50:
+        row["status"] = "skipped_small_mask"
+        return row
+
+    safe_update_features(
+        row,
+        lambda: add_prefix_to_keys(
+            execute_radiomics_on_mask(patch.gray_patch, patch_mask, extractor),
+            "patch_",
+        ),
+        "error_patch_radiomics",
+    )
+    return row
+
+
+def process_cellseg_patch(
+    patch: PatchData,
+    row: Dict[str, Any],
+    extractor,
+    shape_extractor,
+    output_dir: str,
+    sample_id: str,
+    label: int,
+    save_patches: bool,
+    cellseg_df: gpd.GeoDataFrame,
+) -> Dict[str, Any]:
+    patch_cellseg = get_patch_cellseg(cellseg_df, patch.patch_idx)
+    row["n_cells_total"] = int(len(patch_cellseg))
+
+    if len(patch_cellseg) == 0:
+        row["status"] = "skipped_no_cellseg_mask"
+        row.update(extract_cell_type_distribution(patch_cellseg))
+        return row
+
+    merged_mask = rasterize_geometries_to_mask(
+        patch_cellseg.geometry.tolist(),
+        image_shape=patch.gray_patch.shape,
+        label=label,
+    )
+    row["cellseg_mask_area"] = int(np.count_nonzero(merged_mask > 0))
+
+    if save_patches:
+        row["mask_path"] = save_region_mask_images(
+            color_patch=patch.color_patch,
+            gray_patch=patch.gray_patch,
+            mask_patch=merged_mask,
+            output_dir=output_dir,
+            sample_id=sample_id,
+            mask_filename=f"{patch.base_filename}__cellseg_all",
+        )
+
+    safe_update_features(
+        row,
+        lambda: extract_patch_level_radiomics(patch.gray_patch, extractor, label=label),
+        "error_patch_radiomics",
+    )
+
+    safe_update_features(
+        row,
+        lambda: extract_cellseg_level_radiomics(
+            patch.gray_patch, patch_cellseg, extractor, label=label
+        ),
+        "error_cellseg_radiomics",
+    )
+
+    safe_update_features(
+        row,
+        lambda: extract_morphology_aggregates(
+            patch.gray_patch,
+            patch_cellseg,
+            label=label,
+            shape_extractor=shape_extractor,
+        ),
+        "error_morphology",
+    )
+
+    safe_update_features(
+        row,
+        lambda: extract_cell_type_distribution(patch_cellseg),
+        "error_distribution",
+    )
+
+    return row
+
 
 def process_single_patch(
     f,
@@ -661,144 +929,60 @@ def process_single_patch(
     extractor,
     label=255,
     save_patches=True,
-    mask_source: str = "threshold",   # threshold | cellseg
+    mask_source: str = "threshold",
     cellseg_df: Optional[gpd.GeoDataFrame] = None,
+    shape_extractor=None,
 ):
-    img = f[img_key][i]
-
-    if img.ndim == 3 and img.shape[2] == 3:
-        color_patch = img.astype(np.uint8)
-    elif img.ndim == 3 and img.shape[0] == 3:
-        color_patch = np.transpose(img, (1, 2, 0)).astype(np.uint8)
-    else:
-        raise ValueError(f"Unexpected image shape: {img.shape} for patch index {i}")
-
-    gray_patch = np.array(Image.fromarray(color_patch).convert("L"))
-
-    coords = f[coords_key][i] if coords_key else None
-    barcode = f[barcodes_key][i] if barcodes_key else None
-    barcode = to_str_barcode(barcode) if barcode is not None else None
-
-    base_filename = make_base_name(i, barcode)
-
-    color_path = ""
-    gray_path = ""
-
-    if save_patches:
-        color_path, gray_path = save_patch_images_once(
-            color_patch=color_patch,
-            gray_patch=gray_patch,
-            output_dir=output_dir,
-            sample_id=sample_id,
-            base_filename=base_filename,
-        )
-
-    row = {
-        "patch_idx": i,
-        "barcode": barcode,
-        "color_path": color_path,
-        "gray_path": gray_path,
-        "x": coords[0] if coords is not None else None,
-        "y": coords[1] if coords is not None else None,
-        "status": "ok",
-    }
+    patch = load_patch_data(
+        f=f,
+        img_key=img_key,
+        coords_key=coords_key,
+        barcodes_key=barcodes_key,
+        patch_idx=i,
+    )
+    row = build_patch_row_base(
+        patch=patch,
+        output_dir=output_dir,
+        sample_id=sample_id,
+        save_patches=save_patches,
+    )
 
     if mask_source == "threshold":
-        patch_mask = build_threshold_mask(gray_patch, label=label)
-        row["patch_mask_area"] = int(np.count_nonzero(patch_mask > 0))
+        return process_threshold_patch(
+            patch=patch,
+            row=row,
+            extractor=extractor,
+            output_dir=output_dir,
+            sample_id=sample_id,
+            label=label,
+            save_patches=save_patches,
+        )
 
-        if save_patches:
-            mask_path = save_region_mask_images(
-                color_patch=color_patch,
-                gray_patch=gray_patch,
-                mask_patch=patch_mask,
-                output_dir=output_dir,
-                sample_id=sample_id,
-                mask_filename=f"{base_filename}__threshold",
-            )
-            row["mask_path"] = mask_path
-        else:
-            row["mask_path"] = ""
-
-        if row["patch_mask_area"] < 50:
-            row["status"] = "skipped_small_mask"
-            return row
-
-        try:
-            patch_feats = execute_radiomics_on_mask(gray_patch, patch_mask, extractor)
-            row.update(add_prefix_to_keys(patch_feats, "patch_"))
-            return row
-        except Exception as e:
-            row["status"] = f"error: {repr(e)}"
-            return row
-
-    elif mask_source == "cellseg":
+    if mask_source == "cellseg":
         if cellseg_df is None:
             raise ValueError("mask_source='cellseg' requires cellseg_df")
 
-        patch_cellseg = cellseg_df[cellseg_df["patch_idx"] == i].copy()
-        patch_cellseg = patch_cellseg[patch_cellseg.geometry.notnull()]
+        if shape_extractor is None:
+            shape_extractor = get_worker_shape2d_extractor(label)
 
-        row["n_cells_total"] = int(len(patch_cellseg))
-
-        if len(patch_cellseg) == 0:
-            row["status"] = "skipped_no_cellseg_mask"
-            row.update(extract_cell_type_distribution(patch_cellseg))
-            return row
-
-        # save merged all-cell mask for visual/debugging
-        merged_mask = rasterize_geometries_to_mask(
-            patch_cellseg.geometry.tolist(),
-            image_shape=gray_patch.shape,
+        return process_cellseg_patch(
+            patch=patch,
+            row=row,
+            extractor=extractor,
+            shape_extractor=shape_extractor,
+            output_dir=output_dir,
+            sample_id=sample_id,
             label=label,
+            save_patches=save_patches,
+            cellseg_df=cellseg_df,
         )
-        row["cellseg_mask_area"] = int(np.count_nonzero(merged_mask > 0))
 
-        if save_patches:
-            mask_path = save_region_mask_images(
-                color_patch=color_patch,
-                gray_patch=gray_patch,
-                mask_patch=merged_mask,
-                output_dir=output_dir,
-                sample_id=sample_id,
-                mask_filename=f"{base_filename}__cellseg_all",
-            )
-            row["mask_path"] = mask_path
-        else:
-            row["mask_path"] = ""
+    raise ValueError(f"Unsupported mask_source: {mask_source}")
 
-        # 1) patch-level intensity/texture
-        try:
-            row.update(extract_patch_level_radiomics(gray_patch, extractor, label=label))
-        except Exception as e:
-            row["status"] = f"error_patch_radiomics: {repr(e)}"
 
-        # 2) cellseg merged/per-class intensity/texture
-        try:
-            row.update(extract_cellseg_level_radiomics(gray_patch, patch_cellseg, extractor, label=label))
-        except Exception as e:
-            if row["status"] == "ok":
-                row["status"] = f"error_cellseg_radiomics: {repr(e)}"
-
-        # 3) morphology aggregation
-        try:
-            row.update(extract_morphology_aggregates(gray_patch, patch_cellseg, label=label))
-        except Exception as e:
-            if row["status"] == "ok":
-                row["status"] = f"error_morphology: {repr(e)}"
-
-        # 4) cell-type distribution
-        try:
-            row.update(extract_cell_type_distribution(patch_cellseg))
-        except Exception as e:
-            if row["status"] == "ok":
-                row["status"] = f"error_distribution: {repr(e)}"
-
-        return row
-
-    else:
-        raise ValueError(f"Unsupported mask_source: {mask_source}")
-
+# ------------------------------------------------------------------------------
+# chunk / pipeline
+# ------------------------------------------------------------------------------
 
 def process_patch_chunk(
     h5_path,
@@ -815,12 +999,13 @@ def process_patch_chunk(
 ):
     rows = []
 
-    extractor = build_radiomics_extractor(
+    extractor = get_worker_radiomics_extractor(
         classes=classes,
         filters=filters,
         label=label,
         image_type_settings=image_type_settings,
     )
+    shape_extractor = get_worker_shape2d_extractor(label)
 
     cellseg_df = load_cellseg_dataframe(cellseg_path) if mask_source == "cellseg" else None
 
@@ -844,21 +1029,11 @@ def process_patch_chunk(
                     save_patches=save_patches,
                     mask_source=mask_source,
                     cellseg_df=cellseg_df,
+                    shape_extractor=shape_extractor,
                 )
                 rows.append(row)
             except Exception as e:
-                rows.append(
-                    {
-                        "patch_idx": i,
-                        "barcode": None,
-                        "color_path": "",
-                        "gray_path": "",
-                        "mask_path": "",
-                        "x": None,
-                        "y": None,
-                        "status": f"error: {str(e)}",
-                    }
-                )
+                rows.append(make_error_row(i, str(e)))
 
     return rows
 
@@ -898,7 +1073,6 @@ def extract_radiomics(
     if mask_source == "cellseg" and not cellseg_path:
         raise ValueError("cellseg_path is required when mask_source='cellseg'")
 
-    # single-process
     if num_workers is None or num_workers <= 1:
         rows = []
 
@@ -910,6 +1084,7 @@ def extract_radiomics(
                 image_type_settings=image_type_settings,
             )
 
+        shape_extractor = build_shape2d_extractor(label=label)
         cellseg_df = load_cellseg_dataframe(cellseg_path) if mask_source == "cellseg" else None
 
         with h5py.File(h5_path, "r") as f:
@@ -932,28 +1107,17 @@ def extract_radiomics(
                         save_patches=save_patches,
                         mask_source=mask_source,
                         cellseg_df=cellseg_df,
+                        shape_extractor=shape_extractor,
                     )
                     rows.append(row)
                 except Exception as e:
-                    rows.append(
-                        {
-                            "patch_idx": i,
-                            "barcode": None,
-                            "color_path": "",
-                            "gray_path": "",
-                            "mask_path": "",
-                            "x": None,
-                            "y": None,
-                            "status": f"error: {str(e)}",
-                        }
-                    )
+                    rows.append(make_error_row(i, str(e)))
 
         return {
             "total_num_patches": total_num_patches,
             "rows": rows,
         }
 
-    # multi-process
     num_workers = min(num_workers, os.cpu_count() or 1)
     chunks = split_indices(patch_indices, num_workers * 64)
     rows = []
@@ -999,81 +1163,21 @@ def extract_radiomics(
 # post-processing helpers
 # ------------------------------------------------------------------------------
 
+def is_processed_feature_column(col: str) -> bool:
+    col_lower = col.lower()
+
+    if col_lower.startswith("morph_"):
+        return True
+
+    if not (col_lower.startswith("patch_") or col_lower.startswith("cellseg_")):
+        return False
+
+    remainder = col_lower.split("_", 1)[1] if "_" in col_lower else ""
+    return any(token in remainder for token in RADIOMICS_IMAGE_PREFIXES)
+
+
 def get_radiomics_feature_columns(df: pd.DataFrame) -> List[str]:
-    feature_prefixes = (
-        "patch_original_",
-        "patch_wavelet-",
-        "patch_log-sigma-",
-        "patch_square_",
-        "patch_squareroot_",
-        "patch_logarithm_",
-        "patch_exponential_",
-        "cellseg_all_original_",
-        "cellseg_all_wavelet-",
-        "cellseg_all_log-sigma-",
-        "cellseg_all_square_",
-        "cellseg_all_squareroot_",
-        "cellseg_all_logarithm_",
-        "cellseg_all_exponential_",
-        "cellseg_neoplastic_original_",
-        "cellseg_inflammatory_original_",
-        "cellseg_connective_original_",
-        "cellseg_dead_original_",
-        "cellseg_epithelial_original_",
-        "cellseg_background_original_",
-        "cellseg_unknown_original_",
-        "cellseg_neoplastic_wavelet-",
-        "cellseg_inflammatory_wavelet-",
-        "cellseg_connective_wavelet-",
-        "cellseg_dead_wavelet-",
-        "cellseg_epithelial_wavelet-",
-        "cellseg_background_wavelet-",
-        "cellseg_unknown_wavelet-",
-        "cellseg_neoplastic_log-sigma-",
-        "cellseg_inflammatory_log-sigma-",
-        "cellseg_connective_log-sigma-",
-        "cellseg_dead_log-sigma-",
-        "cellseg_epithelial_log-sigma-",
-        "cellseg_background_log-sigma-",
-        "cellseg_unknown_log-sigma-",
-        "cellseg_neoplastic_square_",
-        "cellseg_inflammatory_square_",
-        "cellseg_connective_square_",
-        "cellseg_dead_square_",
-        "cellseg_epithelial_square_",
-        "cellseg_background_square_",
-        "cellseg_unknown_square_",
-        "cellseg_neoplastic_squareroot_",
-        "cellseg_inflammatory_squareroot_",
-        "cellseg_connective_squareroot_",
-        "cellseg_dead_squareroot_",
-        "cellseg_epithelial_squareroot_",
-        "cellseg_background_squareroot_",
-        "cellseg_unknown_squareroot_",
-        "cellseg_neoplastic_logarithm_",
-        "cellseg_inflammatory_logarithm_",
-        "cellseg_connective_logarithm_",
-        "cellseg_dead_logarithm_",
-        "cellseg_epithelial_logarithm_",
-        "cellseg_background_logarithm_",
-        "cellseg_unknown_logarithm_",
-        "cellseg_neoplastic_exponential_",
-        "cellseg_inflammatory_exponential_",
-        "cellseg_connective_exponential_",
-        "cellseg_dead_exponential_",
-        "cellseg_epithelial_exponential_",
-        "cellseg_background_exponential_",
-        "cellseg_unknown_exponential_",
-    )
-
-    morph_prefixes = ("morph_",)
-
-    cols = []
-    for col in df.columns:
-        col_lower = col.lower()
-        if col_lower.startswith(feature_prefixes) or col_lower.startswith(morph_prefixes):
-            cols.append(col)
-    return cols
+    return [col for col in df.columns if is_processed_feature_column(col)]
 
 
 def clip_feature_series(

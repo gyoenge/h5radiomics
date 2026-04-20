@@ -116,3 +116,62 @@ python -m h5radiomics.pipelines.run_extract \
     - morphology(shape2D) per-cell 추출 후 first-order aggregation
     - cell-type count / ratio features
 
+
+---
+
+### extract engine 최적화
+
+# 1. constants / dataclass
+# 2. extractor builders
+# 3. geometry helpers
+# 4. naming / feature utility
+# 5. patch loading / row builders
+# 6. feature extractors
+# 7. threshold / cellseg processors
+# 8. chunk / pipeline runner
+# 9. post-processing
+
+1) process_single_patch 분리
+
+지금은 patch 로딩, metadata, mask 생성, 저장, feature extraction, status handling이 다 섞여 있다. 
+
+이걸 아래처럼 나눈다:
+
+- load_patch_data()
+- build_patch_row_base()
+- process_threshold_patch()
+- process_cellseg_patch()
+- safe_update_features()
+
+2) feature prefix 하드코딩 제거
+
+지금 get_radiomics_feature_columns()에 class별 prefix가 전부 박혀 있음.
+
+이건 이렇게 바꾼다: 
+
+- radiomics feature suffix는 공통 규칙으로 판별
+- prefix는 patch_, cellseg_, morph_ 같은 상위 prefix만 확인
+- cellseg_neoplastic_, cellseg_dead_ 같은 건 동적으로 허용
+
+3) extractor 생성 비용 줄이기
+
+지금은 멀티프로세스에서 chunk마다 build_radiomics_extractor()를 새로 만듦.
+
+이건 최소한 다음처럼 바꾸는 게 좋다:
+
+- worker 단위 1회 생성
+- chunk 함수 안이 아니라 worker initializer 또는 worker-local cache 사용
+
+파이썬 ProcessPoolExecutor는 initializer 지원이 제한적일 수 있으니,
+현 구조에서는 chunk 함수 내부 캐시 전역 변수로도 충분히 개선 가능.
+
+4) I/O와 compute 분리
+
+지금은 feature 계산 중에 이미지 저장도 같이 함.
+
+이걸:
+
+- compute 단계: feature, mask, metadata 생성
+- save 단계: 필요한 경우만 이미지 저장
+
+으로 나누면 테스트도 쉬워지고 재사용성도 좋아짐. 
