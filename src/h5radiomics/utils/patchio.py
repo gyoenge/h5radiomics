@@ -1,8 +1,10 @@
-from typing import Dict, Any
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict, Any, Optional
 import os 
 import numpy as np
 from PIL import Image
-from ..engines.extract import PatchData
 from h5radiomics.utils.io import make_base_name
 from h5radiomics.utils.h5 import (
     to_str_barcode,
@@ -14,6 +16,17 @@ from h5radiomics.utils.paths import (
     get_patch_masked_color_dir,
     get_patch_masked_gray_dir,
 )
+
+
+@dataclass
+class PatchData:
+    patch_idx: int
+    color_patch: np.ndarray
+    gray_patch: np.ndarray
+    coords: Optional[Any]
+    barcode: Optional[str]
+    base_filename: str
+
 
 # ------------------------------------------------------------------------------
 # save helpers (I/O)

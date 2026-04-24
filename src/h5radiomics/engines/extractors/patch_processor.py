@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Dict, Optional
 import geopandas as gpd
 import numpy as np
@@ -12,6 +11,7 @@ from h5radiomics.utils import (
     save_region_mask_images, safe_update_features, 
     load_patch_data, 
     build_patch_row_base, 
+    PatchData, 
 )
 from h5radiomics.engines.extractors import (
     extract_patch_level_radiomics,
@@ -26,16 +26,6 @@ from h5radiomics.engines.extractors.intensity_texture import (
     _add_prefix_to_keys, 
     _execute_radiomics_on_mask, 
 )
-
-
-@dataclass
-class PatchData:
-    patch_idx: int
-    color_patch: np.ndarray
-    gray_patch: np.ndarray
-    coords: Optional[Any]
-    barcode: Optional[str]
-    base_filename: str
 
 
 # ------------------------------------------------------------------------------

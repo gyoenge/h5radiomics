@@ -80,7 +80,8 @@ celltype_mode="per_class"이면 row가 이런 식으로 나옵니다.
 
 ```bash
 python -m h5radiomics.pipelines.run_full \
-  --config configs/full.yaml
+  --config configs/full.yaml \
+  --skip_segment --skip_statistics
 ```
 
 extract만:
