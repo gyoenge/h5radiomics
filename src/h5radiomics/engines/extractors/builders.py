@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from radiomics import featureextractor  # pyright: ignore[reportMissingImports] 
-from h5radiomics.engines.constants import *
+from h5radiomics.engines.extractors.constants import *
 
 _WORKER_EXTRACTOR_CACHE: Dict[Any, Any] = {}
 _WORKER_SHAPE_EXTRACTOR_CACHE: Dict[Any, Any] = {}
@@ -35,15 +35,15 @@ def build_radiomics_extractor(
         extractor.enableFeatureClassByName(cls)
 
     image_types = set(filters or [])
-    image_types.add("Original")
+    image_types.add(RADIOMICS_IMAGE_TYPE_ORIGINAL)
 
     for filt in image_types:
-        if filt == "LoG":
-            log_cfg = image_type_settings.get("LoG", {})
-            sigma = log_cfg.get("sigma", EXTRACTOR_DEFAULT_LOGFILTER_SIGMA)
+        if filt == RADIOMICS_IMAGE_TYPE_LOG:
+            log_cfg = image_type_settings.get(RADIOMICS_IMAGE_TYPE_LOG, {})
+            sigma = log_cfg.get(RADIOMICS_IMAGE_TYPE_LOG_SIGMA, EXTRACTOR_DEFAULT_LOGFILTER_SIGMA)
             if not isinstance(sigma, (list, tuple)) or len(sigma) == 0:
-                raise ValueError("image_type_settings['LoG']['sigma'] must be a non-empty list")
-            extractor.enableImageTypeByName("LoG", customArgs={"sigma": list(sigma)})
+                raise ValueError(f"image_type_settings[{RADIOMICS_IMAGE_TYPE_LOG}][{RADIOMICS_IMAGE_TYPE_LOG_SIGMA}] must be a non-empty list")
+            extractor.enableImageTypeByName(RADIOMICS_IMAGE_TYPE_LOG, customArgs={RADIOMICS_IMAGE_TYPE_LOG_SIGMA: list(sigma)})
         else:
             extractor.enableImageTypeByName(filt)
 
@@ -61,8 +61,8 @@ def build_shape2d_extractor(label=EXTRACTOR_DEFAULT_LABEL):
     }
     extractor = featureextractor.RadiomicsFeatureExtractor(**settings)
     extractor.disableAllFeatures()
-    extractor.enableFeatureClassByName("shape2D")
-    extractor.enableImageTypeByName("Original")
+    extractor.enableFeatureClassByName(RADIOMICS_FEATURE_CLASS_SHAPE2D)
+    extractor.enableImageTypeByName(RADIOMICS_IMAGE_TYPE_ORIGINAL)
     return extractor
 
 
@@ -84,7 +84,7 @@ def _get_worker_radiomics_extractor(classes, filters, label, image_type_settings
 
 
 def _get_worker_shape2d_extractor(label):
-    key = ("shape2d", label)
+    key = (RADIOMICS_FEATURE_CLASS_SHAPE2D, label)
     if key not in _WORKER_SHAPE_EXTRACTOR_CACHE:
         _WORKER_SHAPE_EXTRACTOR_CACHE[key] = build_shape2d_extractor(label=label)
     return _WORKER_SHAPE_EXTRACTOR_CACHE[key]

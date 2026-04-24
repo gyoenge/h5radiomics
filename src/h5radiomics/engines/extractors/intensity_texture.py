@@ -4,7 +4,7 @@ from typing import Any, Dict
 import geopandas as gpd
 import numpy as np
 import SimpleITK as sitk
-from h5radiomics.engines.constants import *
+from h5radiomics.engines.extractors.constants import *
 from h5radiomics.utils import (
     build_threshold_mask, 
     rasterize_geometries_to_mask, 
@@ -70,7 +70,7 @@ def extract_patch_level_radiomics(
 ) -> Dict[str, float]:
     patch_mask = build_threshold_mask(gray_patch, label=label)
     features = _execute_radiomics_on_mask(gray_patch, patch_mask, extractor)
-    return _add_prefix_to_keys(features, "patch_")
+    return _add_prefix_to_keys(features, PATCH_FEATURE_PREFIX)
 
 
 def extract_cellseg_level_radiomics(
@@ -95,9 +95,9 @@ def extract_cellseg_level_radiomics(
         label=label,
     )
     all_feats = _execute_radiomics_on_mask(gray_patch, mask_all, extractor)
-    out.update(_add_prefix_to_keys(all_feats, make_feature_prefix("cellseg", "all")))
+    out.update(_add_prefix_to_keys(all_feats, make_feature_prefix(CELLSEG_FEATURE_PREFIX, CELLSEG_ALL_SUFFIX)))
 
-    for class_name, sub in patch_cellseg.groupby("class_name"):
+    for class_name, sub in patch_cellseg.groupby(CELL_CLASS_COLUMN):
         if len(sub) == 0:
             continue
 
@@ -107,6 +107,6 @@ def extract_cellseg_level_radiomics(
             label=label,
         )
         cls_feats = _execute_radiomics_on_mask(gray_patch, mask_cls, extractor)
-        out.update(_add_prefix_to_keys(cls_feats, make_feature_prefix("cellseg", class_name)))
+        out.update(_add_prefix_to_keys(cls_feats, make_feature_prefix(CELLSEG_FEATURE_PREFIX, class_name)))
 
     return out

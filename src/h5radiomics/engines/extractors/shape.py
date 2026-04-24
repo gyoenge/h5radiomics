@@ -5,7 +5,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd 
 import SimpleITK as sitk
-from h5radiomics.engines.constants import *
+from h5radiomics.engines.extractors.constants import *
 from h5radiomics.utils import (
     build_local_polygon_mask, 
     crop_patch_by_bbox, align_local_mask_to_crop, 
@@ -156,7 +156,7 @@ def extract_morphology_aggregates(
     per_cell_rows = []
     for _, r in patch_cellseg.iterrows():
         geom = r.geometry
-        class_name = normalize_class_name(r.get("class_name", "unknown"))
+        class_name = normalize_class_name(r.get(CELL_CLASS_COLUMN, "unknown"))
         try:
             feats = extract_single_cell_shape_features(
                 gray_patch=gray_patch,
@@ -166,7 +166,7 @@ def extract_morphology_aggregates(
             )
             if not feats:
                 continue
-            feats["class_name"] = class_name
+            feats[CELL_CLASS_COLUMN] = class_name
             per_cell_rows.append(feats)
         except Exception:
             continue
@@ -175,7 +175,7 @@ def extract_morphology_aggregates(
         return out
 
     cell_df = pd.DataFrame(per_cell_rows)
-    morph_cols = [c for c in cell_df.columns if c != "class_name"]
+    morph_cols = [c for c in cell_df.columns if c != CELL_CLASS_COLUMN]
 
     for col in morph_cols:
         vals = pd.to_numeric(cell_df[col], errors="coerce").dropna().tolist()
@@ -184,7 +184,7 @@ def extract_morphology_aggregates(
         for stat_name, stat_val in agg.items():
             out[f"morph_{base_name}_{stat_name.lower()}"] = stat_val
 
-    for class_name, sub in cell_df.groupby("class_name"):
+    for class_name, sub in cell_df.groupby(CELL_CLASS_COLUMN):
         safe_class = normalize_class_name(class_name)
         for col in morph_cols:
             vals = pd.to_numeric(sub[col], errors="coerce").dropna().tolist()

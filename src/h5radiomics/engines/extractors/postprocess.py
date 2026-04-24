@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
-from h5radiomics.engines.constants import *
+from h5radiomics.engines.extractors.constants import *
 
 
 # ------------------------------------------------------------------------------
@@ -13,10 +13,10 @@ from h5radiomics.engines.constants import *
 def is_processed_feature_column(col: str) -> bool:
     col_lower = col.lower()
 
-    if col_lower.startswith("morph_"):
+    if col_lower.startswith(MORPH_FEATURE_PREFIX):
         return True
 
-    if not (col_lower.startswith("patch_") or col_lower.startswith("cellseg_")):
+    if not (col_lower.startswith(PATCH_FEATURE_PREFIX) or col_lower.startswith(CELLSEG_FEATURE_PREFIX)):
         return False
 
     remainder = col_lower.split("_", 1)[1] if "_" in col_lower else ""
@@ -85,9 +85,9 @@ def minmax_rescale_series(s: pd.Series) -> pd.Series:
 def build_processed_feature_df(
     df: pd.DataFrame,
     status_col: str = "status",
-    ok_status: str = "ok",
-    lower_q: float = 0.01,
-    upper_q: float = 0.99,
+    ok_status: str = STATUS_OK,
+    lower_q: float = DEFAULT_CLIP_LOWER_Q,
+    upper_q: float = DEFAULT_CLIP_UPPER_Q,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     processed_df = df.copy()
     feature_cols = get_radiomics_feature_columns(df)

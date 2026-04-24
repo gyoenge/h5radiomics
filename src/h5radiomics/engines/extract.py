@@ -8,7 +8,7 @@ from typing import Optional
 import h5py
 from tqdm import tqdm
 
-from h5radiomics.engines.constants import *
+from h5radiomics.engines.extractors.constants import *
 from h5radiomics.utils import (
     get_barcodes_key, get_coords_key, get_img_key,
     load_cellseg_dataframe, 

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 import geopandas as gpd
 import numpy as np
-from h5radiomics.engines.constants import *
+from h5radiomics.engines.extractors.constants import *
 from h5radiomics.utils import (
     build_threshold_mask, 
     rasterize_geometries_to_mask, 
@@ -50,7 +50,7 @@ def get_patch_cellseg(
     patch_cellseg = patch_cellseg[patch_cellseg.geometry.notnull()].copy()
 
     if len(patch_cellseg) > 0:
-        patch_cellseg["class_name"] = patch_cellseg["class_name"].map(normalize_class_name)
+        patch_cellseg[CELL_CLASS_COLUMN] = patch_cellseg[CELL_CLASS_COLUMN].map(normalize_class_name)
 
     return patch_cellseg
 
@@ -78,7 +78,7 @@ def process_threshold_patch(
         )
 
     if row["patch_mask_area"] < 50:
-        row["status"] = "skipped_small_mask"
+        row["status"] = STATUS_SKIPPED_SMALL_MASK
         return row
 
     safe_update_features(
@@ -87,7 +87,7 @@ def process_threshold_patch(
             _execute_radiomics_on_mask(patch.gray_patch, patch_mask, extractor),
             "patch_",
         ),
-        "error_patch_radiomics",
+        ERROR_PATCH_RADIOMICS,
     )
     return row
 
@@ -107,7 +107,7 @@ def process_cellseg_patch(
     row["n_cells_total"] = int(len(patch_cellseg))
 
     if len(patch_cellseg) == 0:
-        row["status"] = "skipped_no_cellseg_mask"
+        row["status"] = STATUS_SKIPPED_NO_CELLSEG
         row.update(extract_cell_type_distribution(patch_cellseg))
         return row
 
@@ -129,7 +129,7 @@ def process_cellseg_patch(
         )
 
     # if save_patches:
-    #     for class_name, sub in patch_cellseg.groupby("class_name"):
+    #     for class_name, sub in patch_cellseg.groupby(CELL_CLASS_COLUMN):
     #         if len(sub) == 0:
     #             continue
 
@@ -163,7 +163,7 @@ def process_cellseg_patch(
     safe_update_features(
         row,
         lambda: extract_patch_level_radiomics(patch.gray_patch, extractor, label=label),
-        "error_patch_radiomics",
+        ERROR_PATCH_RADIOMICS,
     )
 
     safe_update_features(
@@ -171,7 +171,7 @@ def process_cellseg_patch(
         lambda: extract_cellseg_level_radiomics(
             patch.gray_patch, patch_cellseg, extractor, label=label
         ),
-        "error_cellseg_radiomics",
+        ERROR_CELLSEG_RADIOMICS,
     )
 
     safe_update_features(
@@ -182,13 +182,13 @@ def process_cellseg_patch(
             label=label,
             shape_extractor=shape_extractor,
         ),
-        "error_morphology",
+        ERROR_MORPHOLOGY,
     )
 
     safe_update_features(
         row,
         lambda: extract_cell_type_distribution(patch_cellseg),
-        "error_distribution",
+        ERROR_DISTRIBUTION,
     )
 
     return row
@@ -205,7 +205,7 @@ def process_single_patch(
     extractor,
     label=EXTRACTOR_DEFAULT_LABEL,
     save_patches=True,
-    mask_source: str = "threshold",
+    mask_source: str = MASK_SOURCE_THRESHOLD,
     cellseg_df: Optional[gpd.GeoDataFrame] = None,
     shape_extractor=None,
 ):
@@ -223,7 +223,7 @@ def process_single_patch(
         save_patches=save_patches,
     )
 
-    if mask_source == "threshold":
+    if mask_source == MASK_SOURCE_THRESHOLD:
         return process_threshold_patch(
             patch=patch,
             row=row,
@@ -234,9 +234,9 @@ def process_single_patch(
             save_patches=save_patches,
         )
 
-    if mask_source == "cellseg":
+    if mask_source == MASK_SOURCE_CELLSEG:
         if cellseg_df is None:
-            raise ValueError("mask_source='cellseg' requires cellseg_df")
+            raise ValueError(f"mask_source='{MASK_SOURCE_CELLSEG}' requires cellseg_df")
 
         if shape_extractor is None:
             shape_extractor = _get_worker_shape2d_extractor(label)
