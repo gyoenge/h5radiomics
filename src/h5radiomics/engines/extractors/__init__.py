@@ -14,7 +14,9 @@ from .cell_distribution import (
 from .patch_processor import (
     process_single_patch, 
 )
-
+from .postprocess import (
+    build_processed_feature_df, 
+)
 
 __all__ = [
     extract_patch_level_radiomics,
@@ -22,4 +24,5 @@ __all__ = [
     extract_morphology_aggregates, 
     extract_cell_type_distribution, 
     process_single_patch, 
+    build_processed_feature_df, 
 ]

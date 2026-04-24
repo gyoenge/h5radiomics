@@ -19,7 +19,7 @@ from h5radiomics.utils.paths import (
     get_processing_stats_csv_path,
     get_processing_config_json_path,
 )
-from h5radiomics.engines.extract import (
+from h5radiomics.engines import (
     build_radiomics_extractor,
     extract_radiomics,
     build_processed_feature_df,
