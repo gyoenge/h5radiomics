@@ -61,7 +61,8 @@ drop_diagnostic: true
 save_per_sample: true
 save_merged: false
 
-save_representatives: true
+# save_representatives: true
+save_representatives: false 
 representative_image_col: color_path
 representative_stats:
   - min
