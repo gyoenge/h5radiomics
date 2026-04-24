@@ -46,7 +46,7 @@ def get_patch_cellseg(
     cellseg_df: gpd.GeoDataFrame,
     patch_idx: int,
 ) -> gpd.GeoDataFrame:
-    patch_cellseg = cellseg_df[cellseg_df["patch_idx"] == patch_idx].copy()
+    patch_cellseg = cellseg_df[cellseg_df[PATCH_IDX_COLUMN] == patch_idx].copy()
     patch_cellseg = patch_cellseg[patch_cellseg.geometry.notnull()].copy()
 
     if len(patch_cellseg) > 0:
@@ -65,20 +65,20 @@ def process_threshold_patch(
     save_patches: bool,
 ) -> Dict[str, Any]:
     patch_mask = build_threshold_mask(patch.gray_patch, label=label)
-    row["patch_mask_area"] = int(np.count_nonzero(patch_mask > 0))
+    row[PATCH_MASK_AREA_COLUMN] = int(np.count_nonzero(patch_mask > 0))
 
     if save_patches:
-        row["mask_path"] = save_region_mask_images(
+        row[MASK_PATH_COLUMN] = save_region_mask_images(
             color_patch=patch.color_patch,
             gray_patch=patch.gray_patch,
             mask_patch=patch_mask,
             output_dir=output_dir,
             sample_id=sample_id,
-            mask_filename=f"{patch.base_filename}__threshold",
+            mask_filename=f"{patch.base_filename}{THRESHOLD_MASK_SUFFIX}",
         )
 
-    if row["patch_mask_area"] < 50:
-        row["status"] = STATUS_SKIPPED_SMALL_MASK
+    if row[PATCH_MASK_AREA_COLUMN] < PATCH_MASK_AREA_MIN_THRESHOLD:
+        row[STATUS_COLUMN] = STATUS_SKIPPED_SMALL_MASK
         return row
 
     safe_update_features(
@@ -104,10 +104,10 @@ def process_cellseg_patch(
     cellseg_df: gpd.GeoDataFrame,
 ) -> Dict[str, Any]:
     patch_cellseg = get_patch_cellseg(cellseg_df, patch.patch_idx)
-    row["n_cells_total"] = int(len(patch_cellseg))
+    row[N_CELLS_TOTAL_COLUMN] = int(len(patch_cellseg))
 
     if len(patch_cellseg) == 0:
-        row["status"] = STATUS_SKIPPED_NO_CELLSEG
+        row[STATUS_COLUMN] = STATUS_SKIPPED_NO_CELLSEG
         row.update(extract_cell_type_distribution(patch_cellseg))
         return row
 
@@ -116,16 +116,16 @@ def process_cellseg_patch(
         image_shape=patch.gray_patch.shape,
         label=label,
     )
-    row["cellseg_mask_area"] = int(np.count_nonzero(merged_mask > 0))
+    row[CELLSEG_MASK_AREA_COLUMN] = int(np.count_nonzero(merged_mask > 0))
 
     if save_patches:
-        row["mask_path"] = save_region_mask_images(
+        row[MASK_PATH_COLUMN] = save_region_mask_images(
             color_patch=patch.color_patch,
             gray_patch=patch.gray_patch,
             mask_patch=merged_mask,
             output_dir=output_dir,
             sample_id=sample_id,
-            mask_filename=f"{patch.base_filename}__cellseg_all",
+            mask_filename=f"{patch.base_filename}{CELLSEG_ALL_MASK_SUFFIX}",
         )
 
     # if save_patches:
@@ -157,7 +157,7 @@ def process_cellseg_patch(
             mask_patch=threshold_mask,
             output_dir=output_dir,
             sample_id=sample_id,
-            mask_filename=f"{patch.base_filename}__threshold",
+            mask_filename=f"{patch.base_filename}{THRESHOLD_MASK_SUFFIX}",
         )
 
     safe_update_features(

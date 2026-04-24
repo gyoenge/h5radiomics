@@ -228,3 +228,24 @@ future options:
 
 DEFAULT_CELLTYPE_MODE = "merged"
 
+
+"""
+Metadata / Output Schema Constants
+: Column names and auxiliary values used in patch-level processing outputs.
+: Avoid hard-coded dataframe keys across processors.
+"""
+
+# Common metadata columns
+PATCH_IDX_COLUMN = "patch_idx"
+STATUS_COLUMN = "status"
+MASK_PATH_COLUMN = "mask_path"
+
+# Area / count statistics columns
+PATCH_MASK_AREA_COLUMN = "patch_mask_area"
+CELLSEG_MASK_AREA_COLUMN = "cellseg_mask_area"
+N_CELLS_TOTAL_COLUMN = "n_cells_total"
+
+# Saved mask suffix names 
+THRESHOLD_MASK_SUFFIX = "__threshold"
+CELLSEG_ALL_MASK_SUFFIX = "__cellseg_all"
+
