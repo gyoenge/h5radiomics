@@ -118,25 +118,26 @@ def process_cellseg_patch(
             mask_filename=f"{patch.base_filename}{CELLSEG_ALL_MASK_SUFFIX}",
         )
 
-    # if save_patches:
-    #     for class_name, sub in patch_cellseg.groupby(CELL_CLASS_COLUMN):
-    #         if len(sub) == 0:
-    #             continue
+    #### 
+    if save_patches:
+        for class_name, sub in patch_cellseg.groupby(CELL_CLASS_COLUMN):
+            if len(sub) == 0:
+                continue
 
-    #         mask_cls = rasterize_geometries_to_mask(
-    #             sub.geometry.tolist(),
-    #             image_shape=patch.gray_patch.shape,
-    #             label=label,
-    #         )
+            mask_cls = rasterize_geometries_to_mask(
+                sub.geometry.tolist(),
+                image_shape=patch.gray_patch.shape,
+                label=label,
+            )
 
-    #         save_region_mask_images(
-    #             color_patch=patch.color_patch,
-    #             gray_patch=patch.gray_patch,
-    #             mask_patch=mask_cls,
-    #             output_dir=output_dir,
-    #             sample_id=sample_id,
-    #             mask_filename=f"{patch.base_filename}__cellseg_{class_name}",
-    #         )
+            save_region_mask_images(
+                color_patch=patch.color_patch,
+                gray_patch=patch.gray_patch,
+                mask_patch=mask_cls,
+                output_dir=output_dir,
+                sample_id=sample_id,
+                mask_filename=f"{patch.base_filename}__cellseg_{class_name}",
+            )
 
     if save_patches:
         threshold_mask = build_threshold_mask(patch.gray_patch, label=label)
