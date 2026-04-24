@@ -37,12 +37,12 @@ def clip_feature_series(
     valid = s_num.dropna()
     if valid.empty:
         return s_num, {
-            "lower_bound": np.nan,
-            "upper_bound": np.nan,
-            "mean": np.nan,
-            "std": np.nan,
-            "min_after_clip": np.nan,
-            "max_after_clip": np.nan,
+            LOWER_BOUND_COLUMN: np.nan,
+            UPPER_BOUND_COLUMN: np.nan,
+            MEAN_COLUMN: np.nan,
+            STD_COLUMN: np.nan,
+            MIN_AFTER_CLIP_COLUMN: np.nan,
+            MAX_AFTER_CLIP_COLUMN: np.nan,
         }
 
     lower_bound = valid.quantile(lower_q)
@@ -51,12 +51,12 @@ def clip_feature_series(
     clipped = s_num.clip(lower=lower_bound, upper=upper_bound)
 
     return clipped, {
-        "lower_bound": float(lower_bound),
-        "upper_bound": float(upper_bound),
-        "mean": float(clipped.mean()) if not pd.isna(clipped.mean()) else np.nan,
-        "std": float(clipped.std(ddof=0)) if not pd.isna(clipped.std(ddof=0)) else np.nan,
-        "min_after_clip": float(clipped.min()) if not pd.isna(clipped.min()) else np.nan,
-        "max_after_clip": float(clipped.max()) if not pd.isna(clipped.max()) else np.nan,
+        LOWER_BOUND_COLUMN: float(lower_bound),
+        UPPER_BOUND_COLUMN: float(upper_bound),
+        MEAN_COLUMN: float(clipped.mean()) if not pd.isna(clipped.mean()) else np.nan,
+        STD_COLUMN: float(clipped.std(ddof=0)) if not pd.isna(clipped.std(ddof=0)) else np.nan,
+        MIN_AFTER_CLIP_COLUMN: float(clipped.min()) if not pd.isna(clipped.min()) else np.nan,
+        MAX_AFTER_CLIP_COLUMN: float(clipped.max()) if not pd.isna(clipped.max()) else np.nan,
     }
 
 
@@ -84,7 +84,7 @@ def minmax_rescale_series(s: pd.Series) -> pd.Series:
 
 def build_processed_feature_df(
     df: pd.DataFrame,
-    status_col: str = "status",
+    status_col: str = STATUS_COLUMN,
     ok_status: str = STATUS_OK,
     lower_q: float = DEFAULT_CLIP_LOWER_Q,
     upper_q: float = DEFAULT_CLIP_UPPER_Q,
@@ -119,16 +119,17 @@ def build_processed_feature_df(
 
         stats_rows.append(
             {
-                "feature": col,
-                "lower_q": lower_q,
-                "upper_q": upper_q,
+                FEATURE_COLUMN: col,
+                LOWER_Q_COLUMN: lower_q,
+                UPPER_Q_COLUMN: upper_q,
                 **clip_stats,
-                "z_mean": float(z_norm.mean()) if len(z_norm.dropna()) else np.nan,
-                "z_std": float(z_norm.std(ddof=0)) if len(z_norm.dropna()) else np.nan,
-                "scaled_min": float(scaled.min()) if len(scaled.dropna()) else np.nan,
-                "scaled_max": float(scaled.max()) if len(scaled.dropna()) else np.nan,
+                Z_MEAN_COLUMN: float(z_norm.mean()) if len(z_norm.dropna()) else np.nan,
+                Z_STD_COLUMN: float(z_norm.std(ddof=0)) if len(z_norm.dropna()) else np.nan,
+                SCALED_MIN_COLUMN: float(scaled.min()) if len(scaled.dropna()) else np.nan,
+                SCALED_MAX_COLUMN: float(scaled.max()) if len(scaled.dropna()) else np.nan,
             }
         )
 
     stats_df = pd.DataFrame(stats_rows)
     return processed_df, stats_df
+

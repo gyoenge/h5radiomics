@@ -16,6 +16,9 @@ KNOWN_CELL_CLASSES = [
     # "unknown",      # excluded by design
 ]
 
+# For unknown cell class 
+UNKNOWN_CELL_CLASS = "unknown"
+
 # Column name used in cell segmentation dataframe
 CELL_CLASS_COLUMN = "class_name"
 
@@ -166,7 +169,7 @@ Low-level thresholds for numerical stability and noise filtering.
 """
 
 # Patch-level mask minimum area
-PATCH_MASK_AREA_MIN_THRESHOLD = 50
+PATCH_MASK_AREA_MIN_THRESHOLD = EXTRACTOR_DEFAULT_MASK_ROI_AREA_THRESHOLD
 
 # Local mask minimum pixels (very small region filtering)
 LOCAL_MASK_MIN_PIXELS = 3
@@ -248,4 +251,19 @@ N_CELLS_TOTAL_COLUMN = "n_cells_total"
 # Saved mask suffix names 
 THRESHOLD_MASK_SUFFIX = "__threshold"
 CELLSEG_ALL_MASK_SUFFIX = "__cellseg_all"
+
+# Stats columns 
+FEATURE_COLUMN = "feature"
+LOWER_Q_COLUMN = "lower_q"
+UPPER_Q_COLUMN = "upper_q"
+LOWER_BOUND_COLUMN = "lower_bound" # for clipped 
+UPPER_BOUND_COLUMN = "upper_bound" # for clipped 
+MEAN_COLUMN = "mean" # for clipped 
+STD_COLUMN = "std" # for clipped 
+MIN_AFTER_CLIP_COLUMN = "min_after_clip" # for clipped 
+MAX_AFTER_CLIP_COLUMN = "max_after_clip" # for clipped 
+Z_MEAN_COLUMN = "z_mean"
+Z_STD_COLUMN = "z_std"
+SCALED_MIN_COLUMN = "scaled_min" 
+SCALED_MAX_COLUMN = "scaled_max"
 

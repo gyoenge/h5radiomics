@@ -56,8 +56,8 @@ def build_shape2d_extractor(label=EXTRACTOR_DEFAULT_LABEL):
     """
     settings = {
         "label": label,
-        "force2D": True,
-        "force2Ddimension": 0,
+        "force2D": EXTRACTOR_DEFAULT_SETTINGS["force2D"],
+        "force2Ddimension": EXTRACTOR_DEFAULT_SETTINGS["force2Ddimension"],
     }
     extractor = featureextractor.RadiomicsFeatureExtractor(**settings)
     extractor.disableAllFeatures()

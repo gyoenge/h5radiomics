@@ -24,7 +24,7 @@ def extract_cell_type_distribution(
     patch_cellseg = patch_cellseg.copy()
     patch_cellseg[CELL_CLASS_COLUMN] = (
         patch_cellseg[CELL_CLASS_COLUMN]
-        .fillna("unknown")
+        .fillna(UNKNOWN_CELL_CLASS)
         .astype(str)
         .str.strip()
         .str.lower()
