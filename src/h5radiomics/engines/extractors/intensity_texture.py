@@ -97,16 +97,16 @@ def extract_cellseg_level_radiomics(
     all_feats = _execute_radiomics_on_mask(gray_patch, mask_all, extractor)
     out.update(_add_prefix_to_keys(all_feats, make_feature_prefix(CELLSEG_FEATURE_PREFIX, CELLSEG_ALL_SUFFIX)))
 
-    for class_name, sub in patch_cellseg.groupby(CELL_CLASS_COLUMN):
-        if len(sub) == 0:
-            continue
+    # for class_name, sub in patch_cellseg.groupby(CELL_CLASS_COLUMN):
+    #     if len(sub) == 0:
+    #         continue
 
-        mask_cls = rasterize_geometries_to_mask(
-            sub.geometry.tolist(),
-            image_shape=gray_patch.shape,
-            label=label,
-        )
-        cls_feats = _execute_radiomics_on_mask(gray_patch, mask_cls, extractor)
-        out.update(_add_prefix_to_keys(cls_feats, make_feature_prefix(CELLSEG_FEATURE_PREFIX, class_name)))
+    #     mask_cls = rasterize_geometries_to_mask(
+    #         sub.geometry.tolist(),
+    #         image_shape=gray_patch.shape,
+    #         label=label,
+    #     )
+    #     cls_feats = _execute_radiomics_on_mask(gray_patch, mask_cls, extractor)
+    #     out.update(_add_prefix_to_keys(cls_feats, make_feature_prefix(CELLSEG_FEATURE_PREFIX, class_name)))
 
     return out

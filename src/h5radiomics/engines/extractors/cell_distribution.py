@@ -36,7 +36,8 @@ def extract_cell_type_distribution(
 
     out[DIST_TOTAL_COUNT_KEY] = float(total)
 
-    class_names = sorted(set(KNOWN_CELL_CLASSES).union(set(counts.keys())))
+    # class_names = sorted(set(KNOWN_CELL_CLASSES).union(set(counts.keys())))
+    class_names = list(KNOWN_CELL_CLASSES)
     for cls in class_names:
         cnt = int(counts.get(cls, 0))
         ratio = float(cnt / total) if total > 0 else 0.0

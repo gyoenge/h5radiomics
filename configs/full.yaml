@@ -2,10 +2,11 @@
 # Common (shared)
 # =========================
 sample_ids:
-  - TENX99
-  - TENX95
-  - NCBI785
-  - NCBI783
+  # - TENX99
+  # - TENX95
+  # - NCBI785
+  # - NCBI783
+  - sample 
 
 input_dir: /root/workspace/hest-radiomics/data/h5
 output_dir: /root/workspace/hest-radiomics/data/outputs
@@ -14,7 +15,7 @@ output_dir: /root/workspace/hest-radiomics/data/outputs
 # =========================
 # Extract (radiomics)
 # =========================
-label: 255
+label: 1
 
 classes:
   - firstorder
@@ -37,7 +38,7 @@ image_type_settings:
   LoG:
     sigma: [1.0, 2.0, 3.0]
 
-num_workers: 8
+num_workers: 16
 save_patches: false  
 
 # cellseg-based extraction
@@ -90,10 +91,10 @@ device: cuda:0
 # segment loader worker를 꼭 따로 나누고 싶으면 run_segment / config 구조도 분리하는 게 안전함.
 patch_indices: null   # null or "all" or [0,1,2,...]
 
-save_png_overlay: true
+save_png_overlay: false 
 use_class_color: true
 save_geojson_per_patch: false
 
-postprocess_threads: 4
+postprocess_threads: 1
 verbose: false
 

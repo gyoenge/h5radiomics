@@ -69,8 +69,7 @@ def _execute_firstorder_aggregation(values: List[float]) -> Dict[str, float]:
     energy_val = float(np.sum(arr ** 2))
     rms_val = float(np.sqrt(np.mean(arr ** 2)))
 
-    return {
-        # "count": float(n),
+    stat_map = {
         "mean": mean_val,
         "median": median_val,
         "minimum": min_val,
@@ -82,7 +81,7 @@ def _execute_firstorder_aggregation(values: List[float]) -> Dict[str, float]:
         "p25": p25_val,
         "p75": p75_val,
         "p90": p90_val,
-        "iqr": iqr_val, # inter quartile range 
+        "iqr": iqr_val,
         "meanabsolutedeviation": mad_val,
         "skewness": skew_val,
         "kurtosis": kurt_val,
@@ -90,6 +89,8 @@ def _execute_firstorder_aggregation(values: List[float]) -> Dict[str, float]:
         "energy": energy_val,
         "rootmeansquared": rms_val,
     }
+
+    return {k: stat_map[k] for k in MORPH_AGG_STAT_KEYS}
 
 
 
@@ -156,7 +157,7 @@ def extract_morphology_aggregates(
     per_cell_rows = []
     for _, r in patch_cellseg.iterrows():
         geom = r.geometry
-        class_name = normalize_class_name(r.get(CELL_CLASS_COLUMN, "unknown"))
+        class_name = normalize_class_name(r.get(CELL_CLASS_COLUMN, UNKNOWN_CELL_CLASS))
         try:
             feats = extract_single_cell_shape_features(
                 gray_patch=gray_patch,
@@ -184,14 +185,14 @@ def extract_morphology_aggregates(
         for stat_name, stat_val in agg.items():
             out[f"morph_{base_name}_{stat_name.lower()}"] = stat_val
 
-    for class_name, sub in cell_df.groupby(CELL_CLASS_COLUMN):
-        safe_class = normalize_class_name(class_name)
-        for col in morph_cols:
-            vals = pd.to_numeric(sub[col], errors="coerce").dropna().tolist()
-            agg = _execute_firstorder_aggregation(vals)
-            base_name = strip_shape2d_prefix(col)
-            for stat_name, stat_val in agg.items():
-                out[f"morph_{safe_class}_{base_name}_{stat_name.lower()}"] = stat_val
+    # for class_name, sub in cell_df.groupby(CELL_CLASS_COLUMN):
+    #     safe_class = normalize_class_name(class_name)
+    #     for col in morph_cols:
+    #         vals = pd.to_numeric(sub[col], errors="coerce").dropna().tolist()
+    #         agg = _execute_firstorder_aggregation(vals)
+    #         base_name = strip_shape2d_prefix(col)
+    #         for stat_name, stat_val in agg.items():
+    #             out[f"morph_{safe_class}_{base_name}_{stat_name.lower()}"] = stat_val
 
     return out
 
