@@ -1,6 +1,9 @@
 """
-Cell class labels (Cell segmentation output)
-: Must be consistent with upstream cell segmentation model outputs.
+Cell class labels from upstream cell segmentation model.
+
+Note: 
+- Must match exactly with the segmentation model output.
+- Used for distribution / cell-type-aware feature extraction.
 """
 
 KNOWN_CELL_CLASSES = [
@@ -9,15 +12,23 @@ KNOWN_CELL_CLASSES = [
     "connective",
     "dead",
     "epithelial",
-    # "background",
-    # "unknown",
+    # "background",   # excluded by design
+    # "unknown",      # excluded by design
 ]
 
+# Column name used in cell segmentation dataframe
 CELL_CLASS_COLUMN = "class_name"
 
+
 """
-Radiomics feature prefixes
-: Used to identify valid radiomics features from PyRadiomics outputs.
+Radiomics image prefixes used to filter valid PyRadiomics outputs.
+
+PyRadiomics generates features with prefixes depending on:
+- Image type (Original, Wavelet, LoG, etc.)
+
+We use these prefixes to:
+- Identify valid features
+- Filter out non-radiomics metadata columns
 """
 
 RADIOMICS_IMAGE_PREFIXES = (
@@ -30,11 +41,20 @@ RADIOMICS_IMAGE_PREFIXES = (
     "exponential_",
 )
 
+
 """
-Extractor Settings 
-: 
+Default configuration for PyRadiomics FeatureExtractor.
+
+These values define:
+- Feature classes
+- Image filters
+- Extraction behavior
+
+Note: 
+- Can be overridden via YAML config
 """
 
+# Feature classes to extract
 EXTRACTOR_DEFAULT_CLASSES = [
     "firstorder",
     "glcm",
@@ -44,12 +64,15 @@ EXTRACTOR_DEFAULT_CLASSES = [
     "ngtdm",
 ]
 
+# Image types (filters)
 EXTRACTOR_DEFAULT_FILTERS = [
     "Original",
 ]
 
+# Additional image type settings (e.g., LoG sigma)
 EXTRACTOR_DEFAULT_IMAGE_TYPE_SETTINGS = {}
 
+# Core extractor parameters
 EXTRACTOR_DEFAULT_SETTINGS = {
     "binWidth": 25,
     "resampledPixelSpacing": None,
@@ -59,21 +82,32 @@ EXTRACTOR_DEFAULT_SETTINGS = {
     "distances": [1],
 }
 
+# Mask label value used for ROI extraction
 EXTRACTOR_DEFAULT_LABEL = 255
 
+# LoG filter sigma values (used when LoG enabled)
 EXTRACTOR_DEFAULT_LOGFILTER_SIGMA = [1.0, 2.0, 3.0]
 
-EXTRACTOR_DEFAULT_MASK_ROI_AREA_THRESHOLD = 50 
-
+# Minimum ROI area to consider valid for radiomics
+EXTRACTOR_DEFAULT_MASK_ROI_AREA_THRESHOLD = 50
 
 """
-Status Regarded Value Settings 
+Processing status flags.
+
+Used in output rows to track:
+- Success
+- Skipped cases
+- Error types
 """
 
+# 정상 처리
 STATUS_OK = "ok"
+
+# Skip cases
 STATUS_SKIPPED_SMALL_MASK = "skipped_small_mask"
 STATUS_SKIPPED_NO_CELLSEG = "skipped_no_cellseg_mask"
 
+# Error categories
 ERROR_PATCH_RADIOMICS = "error_patch_radiomics"
 ERROR_CELLSEG_RADIOMICS = "error_cellseg_radiomics"
 ERROR_MORPHOLOGY = "error_morphology"
@@ -81,42 +115,85 @@ ERROR_DISTRIBUTION = "error_distribution"
 
 
 """
-Feature Prefix Settings 
+Feature naming rules for consistent downstream usage.
+
+Prefix strategy:
+- patch_      : patch-level radiomics
+- cellseg_*   : cell segmentation-based features
+- morph_      : morphology features
+- dist_*      : cell distribution features
 """
 
 PATCH_FEATURE_PREFIX = "patch_"
+
 CELLSEG_FEATURE_PREFIX = "cellseg"
 CELLSEG_ALL_SUFFIX = "all"
+
 MORPH_FEATURE_PREFIX = "morph_"
 
+# Distribution features
 DIST_TOTAL_COUNT_KEY = "dist_cell_count_total"
 DIST_COUNT_PREFIX = "dist_count_"
 DIST_RATIO_PREFIX = "dist_ratio_"
 
+
+"""
+Mask source identifiers.
+
+Defines which mask was used for feature extraction:
+- threshold : simple threshold-based mask
+- cellseg   : cell segmentation mask
+"""
+
 MASK_SOURCE_THRESHOLD = "threshold"
 MASK_SOURCE_CELLSEG = "cellseg"
+
+
+"""
+Internal constants related to PyRadiomics naming.
+"""
 
 RADIOMICS_IMAGE_TYPE_ORIGINAL = "Original"
 RADIOMICS_IMAGE_TYPE_LOG = "LoG"
 RADIOMICS_IMAGE_TYPE_LOG_SIGMA = "sigma"
+
+# Shape feature class name (PyRadiomics)
 RADIOMICS_FEATURE_CLASS_SHAPE2D = "shape2D"
 
-"""
 
 """
+Low-level thresholds for numerical stability and noise filtering.
+"""
 
+# Patch-level mask minimum area
 PATCH_MASK_AREA_MIN_THRESHOLD = 50
+
+# Local mask minimum pixels (very small region filtering)
 LOCAL_MASK_MIN_PIXELS = 3
+
+# Histogram bin constraints (first-order features)
 FIRSTORDER_HIST_MAX_BINS = 16
 FIRSTORDER_HIST_MIN_BINS = 2
+
+# Polygon mask margin (padding)
 LOCAL_POLYGON_MASK_MARGIN = 1
+
+
+"""
+Default quantile clipping values for feature normalization.
+"""
 
 DEFAULT_CLIP_LOWER_Q = 0.01
 DEFAULT_CLIP_UPPER_Q = 0.99
 
-"""
 
 """
+Statistical aggregation keys for morphology feature vectors.
+
+Used in manual aggregation (instead of PyRadiomics firstorder)
+to ensure numerical stability.
+"""
+
 MORPH_AGG_STAT_KEYS = [
     "mean",
     "median",
@@ -138,8 +215,15 @@ MORPH_AGG_STAT_KEYS = [
     "rootmeansquared",
 ]
 
-"""
 
+"""
+Cell-type aggregation mode.
+
+merged:
+    - all cell types aggregated together
+
+future options:
+    - per_class (class-wise features)
 """
 
 DEFAULT_CELLTYPE_MODE = "merged"
