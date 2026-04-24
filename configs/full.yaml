@@ -38,7 +38,7 @@ image_type_settings:
     sigma: [1.0, 2.0, 3.0]
 
 num_workers: 8
-save_patches: true
+save_patches: false  
 
 # cellseg-based extraction
 mask_source: cellseg          # threshold | cellseg

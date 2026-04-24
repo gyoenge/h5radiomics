@@ -8,7 +8,7 @@ input_dir: /root/workspace/hest-radiomics/data/h5
 output_dir: /root/workspace/hest-radiomics/data/outputs
 
 label: 255
-save_patches: true
+save_patches: false # true
 num_workers: 8
 
 classes:

@@ -79,26 +79,9 @@ celltype_mode="per_class"이면 row가 이런 식으로 나옵니다.
 전체 파이프라인:
 
 ```bash
-python -m h5radiomics.pipelines.run_full \
+python -m h5radiomics.run \
   --config configs/full.yaml \
   --skip_segment --skip_statistics
-```
-
-extract만:
-
-```bash
-python -m h5radiomics.pipelines.run_extract \
-  --config configs/extract.yaml
-```
-
-특정 cell type만:
-
-```bash
-python -m h5radiomics.pipelines.run_extract \
-  --config configs/extract.yaml \
-  --mask_source cellseg \
-  --celltype_mode single \
-  --target_cell_type neoplastic
 ```
 
 ---
