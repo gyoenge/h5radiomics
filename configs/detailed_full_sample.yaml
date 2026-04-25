@@ -2,10 +2,11 @@
 # Common (shared)
 # =========================
 sample_ids:
-  - TENX95
-  - NCBI785
-  - NCBI783
-  - TENX99
+  # - TENX99
+  # - TENX95
+  # - NCBI785
+  # - NCBI783
+  - sample 
 
 input_dir: /root/workspace/hest-radiomics/data/h5
 output_dir: /root/workspace/hest-radiomics/data/outputs
@@ -14,7 +15,7 @@ output_dir: /root/workspace/hest-radiomics/data/outputs
 # =========================
 # Extract (radiomics)
 # =========================
-label: 255
+label: 1
 
 classes:
   - firstorder
@@ -26,13 +27,25 @@ classes:
 
 filters:
   - Original
+  # - Wavelet
+  # - LoG
+  # - Square
+  # - SquareRoot
+  # - Logarithm
+  # - Exponential
 
 image_type_settings:
   LoG:
     sigma: [1.0, 2.0, 3.0]
 
-num_workers: 8
-save_patches: true
+num_workers: 16
+save_patches: true   
+
+# cellseg-based extraction
+mask_source: cellseg          # threshold | cellseg
+celltype_mode: merged      # merged | per_class | single
+target_cell_type: null        # used only when celltype_mode=single
+cellseg_path: null            # auto: {output_dir}/{sample_id}/cellvitseg/cellseg.parquet
 
 processing:
   lower_q: 0.01
@@ -49,7 +62,8 @@ drop_diagnostic: true
 save_per_sample: true
 save_merged: false
 
-save_representatives: true
+# save_representatives: true
+save_representatives: true  
 representative_image_col: color_path
 representative_stats:
   - min
@@ -66,18 +80,22 @@ save_boxplot: true
 # =========================
 # Segment (CellViT)
 # =========================
-model_dir: /root/workspace/hest-radiomics/models
+model_dir: /root/workspace/hest-radiomics/data/models
 model_name: CellViT-SAM-H-x20.pth
 
 batch_size: 8
-num_workers: 0
+# num_workers: 0
 device: cuda:0
 
+# segment용 worker와 extract용 worker가 같은 키(num_workers)를 공유하면 충돌할 수 있음.
+# 현재 구조상 full config에서 num_workers는 extract 쪽 값(8)으로도 쓰일 수 있으니,
+# segment loader worker를 꼭 따로 나누고 싶으면 run_segment / config 구조도 분리하는 게 안전함.
 patch_indices: null   # null or "all" or [0,1,2,...]
 
-save_png_overlay: true
+save_png_overlay: true 
 use_class_color: true
 save_geojson_per_patch: false
 
-postprocess_threads: 4
+postprocess_threads: 1
 verbose: false
+

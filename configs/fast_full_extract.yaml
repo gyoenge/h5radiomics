@@ -1,0 +1,58 @@
+# =========================
+# Common (shared)
+# =========================
+sample_ids:
+  - TENX99
+  - TENX95
+  - NCBI785
+  - NCBI783
+
+input_dir: /root/workspace/hest-radiomics/data/h5
+output_dir: /root/workspace/hest-radiomics/data/outputs
+
+# =========================
+# Extract (radiomics)
+# =========================
+label: 1
+
+classes:
+  - firstorder
+  - glcm
+  - glrlm
+  - glszm
+  - gldm
+  - ngtdm
+
+filters:
+  - Original
+
+num_workers: 16
+save_patches: false   
+
+mask_source: cellseg         
+celltype_mode: merged     
+target_cell_type: null     
+cellseg_path: null          
+
+processing:
+  lower_q: 0.01
+  upper_q: 0.99
+  save_processed: true
+
+# =========================
+# Segment (CellViT)
+# =========================
+model_dir: /root/workspace/hest-radiomics/data/models
+model_name: CellViT-SAM-H-x20.pth
+batch_size: 8
+device: cuda:0
+save_png_overlay: false 
+postprocess_threads: 1
+verbose: false
+
+# =========================
+# Statistics
+# =========================
+skip_statistics: true 
+
+

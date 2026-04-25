@@ -16,7 +16,7 @@ from h5radiomics.pipelines.run_segment import main as run_segment_main
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser(
-        description="Run the full h5radiomics pipeline: extract -> statistics -> segment"
+        description="Run the full h5radiomics pipeline: segment -> extract -> statistics"
     )
 
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config file")
@@ -32,6 +32,21 @@ def parse_args(args=None):
     parser.add_argument("--filters", nargs="+", type=str, default=None)
     parser.add_argument("--save_patches", action="store_true")
     parser.add_argument("--no_save_patches", action="store_true")
+
+    parser.add_argument(
+        "--mask_source",
+        type=str,
+        default=None,
+        choices=["threshold", "cellseg"],
+    )
+    parser.add_argument("--cellseg_path", type=str, default=None)
+    parser.add_argument(
+        "--celltype_mode",
+        type=str,
+        default=None,
+        choices=["merged", "per_class", "single"],
+    )
+    parser.add_argument("--target_cell_type", type=str, default=None)
 
     # shared runtime
     parser.add_argument("--num_workers", type=int, default=None)
@@ -66,10 +81,6 @@ def parse_args(args=None):
 
 
 def build_full_config(cli_args) -> dict:
-    """
-    Merge all task defaults on top of common defaults, then override with YAML and CLI.
-    This gives one unified config object for the full pipeline.
-    """
     config = get_common_default_config()
     config.update(get_extract_default_config())
     config.update(get_statistics_default_config())
@@ -87,6 +98,11 @@ def build_full_config(cli_args) -> dict:
         config["save_patches"] = True
     if cli_args.no_save_patches:
         config["save_patches"] = False
+
+    config.setdefault("mask_source", "threshold")
+    config.setdefault("celltype_mode", "merged")
+    config.setdefault("target_cell_type", None)
+    config.setdefault("cellseg_path", None)
 
     return config
 
@@ -117,6 +133,18 @@ def config_to_cli_args_for_extract(config: dict, original_args) -> List[str]:
 
     if config.get("num_workers") is not None:
         args += ["--num_workers", str(config["num_workers"])]
+
+    if config.get("mask_source") is not None:
+        args += ["--mask_source", str(config["mask_source"])]
+
+    if config.get("cellseg_path") is not None:
+        args += ["--cellseg_path", str(config["cellseg_path"])]
+
+    if config.get("celltype_mode") is not None:
+        args += ["--celltype_mode", str(config["celltype_mode"])]
+
+    if config.get("target_cell_type") is not None:
+        args += ["--target_cell_type", str(config["target_cell_type"])]
 
     if config.get("save_patches") is True:
         args += ["--save_patches"]
@@ -203,32 +231,35 @@ def main(args=None):
     for k, v in config.items():
         print(f"  {k}: {v}")
 
+    # 1) segment first
+    if not cli_args.skip_segment:
+        print("\n" + "=" * 80)
+        print("[RUN] Stage 1/3: Run CellViT segmentation")
+        print("=" * 80)
+        segment_args = config_to_cli_args_for_segment(config, cli_args)
+        run_segment_main(segment_args)
+    else:
+        print("\n[SKIP] Segment stage skipped")
+
+    # 2) extract second
     if not cli_args.skip_extract:
         print("\n" + "=" * 80)
-        print("[RUN] Stage 1/3: Extract radiomics features")
+        print("[RUN] Stage 2/3: Extract radiomics features")
         print("=" * 80)
         extract_args = config_to_cli_args_for_extract(config, cli_args)
         run_extract_main(extract_args)
     else:
         print("\n[SKIP] Extract stage skipped")
 
+    # 3) statistics last
     if not cli_args.skip_statistics:
         print("\n" + "=" * 80)
-        print("[RUN] Stage 2/3: Compute feature statistics")
+        print("[RUN] Stage 3/3: Compute feature statistics")
         print("=" * 80)
         statistics_args = config_to_cli_args_for_statistics(config, cli_args)
         run_statistics_main(statistics_args)
     else:
         print("\n[SKIP] Statistics stage skipped")
-
-    if not cli_args.skip_segment:
-        print("\n" + "=" * 80)
-        print("[RUN] Stage 3/3: Run CellViT segmentation")
-        print("=" * 80)
-        segment_args = config_to_cli_args_for_segment(config, cli_args)
-        run_segment_main(segment_args)
-    else:
-        print("\n[SKIP] Segment stage skipped")
 
     print("\n" + "=" * 80)
     print("[DONE] Full pipeline finished")

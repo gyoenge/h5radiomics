@@ -179,6 +179,8 @@ class CellViTInferenceAdapter:
         device: str = "cuda:0",
         verbose: bool = False,
     ):
+        self._patch_ray_init()
+
         from cellvit.detect_cells import CellViTInference, SystemConfiguration
 
         self.model_path = model_path
@@ -201,6 +203,27 @@ class CellViTInferenceAdapter:
                 if not name.startswith("_") and callable(getattr(self.runner, name))
             ],
         )
+    
+    def _patch_ray_init(self):
+        import ray
+
+        if getattr(ray, "_patched_by_h5radiomics", False):
+            return
+
+        original_init = ray.init
+
+        def patched_init(*args, **kwargs):
+            kwargs.setdefault("ignore_reinit_error", True)
+            kwargs.setdefault("include_dashboard", False)
+            kwargs.setdefault("_memory", 32 * 1024**3)
+            kwargs.setdefault("object_store_memory", 8 * 1024**3)
+
+            print("[INFO] patched ray.init called")
+            return original_init(*args, **kwargs)
+
+        ray.init = patched_init
+        ray._patched_by_h5radiomics = True
+
 
     def _build_system_configuration(self, SystemConfiguration):
         sig = inspect.signature(SystemConfiguration)

@@ -232,6 +232,8 @@ output_test/*
 # output files
 outputs/
 outputs/* 
+outputs*/
+outputs*/* 
 
 # model files
 models/
@@ -240,3 +242,4 @@ models/*
 
 # test notebook 
 */test.ipynb
+test/
