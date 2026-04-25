@@ -92,7 +92,7 @@ device: cuda:0
 # segment loader worker를 꼭 따로 나누고 싶으면 run_segment / config 구조도 분리하는 게 안전함.
 patch_indices: null   # null or "all" or [0,1,2,...]
 
-save_png_overlay: false 
+save_png_overlay: true 
 use_class_color: true
 save_geojson_per_patch: false
 
