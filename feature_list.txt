@@ -1,5 +1,3 @@
-n_cells_total
-cellseg_mask_area
 patch_original_firstorder_10percentile
 patch_original_firstorder_90percentile
 patch_original_firstorder_energy
