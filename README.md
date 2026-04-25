@@ -106,14 +106,12 @@ python -m h5radiomics.run \
 Optional: 
 
 ```bash
-# skip segmentation
---skip_segment
+# NOTE: segment is requirement of our extraction
+# run only extraction (needs segment output files)
+--skip_segment --skip_statistics
 
-# run only statistics + segment
---skip_extract
-
-# run only segmentation
---skip_extract --skip_statistics
+# run without statistics 
+--skip_statistics
 ```
 
 ---
