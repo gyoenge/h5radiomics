@@ -9,6 +9,9 @@ Radiomics extraction and analysis pipeline for HDF5-based WSI (Whole Slide Image
 This project provides an end-to-end pipeline for patch-level computational pathology:
 
 - Radiomics feature extraction from HDF5-based WSI patches
+  
+  : extracts **Intensity, Texture, Cell-shape, Cell-type** features
+
 - Feature preprocessing and normalization
 - Feature statistics analysis and visualization
 - Representative patch selection
@@ -51,7 +54,6 @@ Each `.h5` file should contain:
     }
 
 
-
 ### Notes
 
 - Images must be RGB patches
@@ -92,35 +94,13 @@ pip install cellvit
 
 ## Usage
 
-### 1. Radiomics Feature Extraction
+### Run Full Pipeline (Recommended)
 
-```bash
-python -m h5radiomics.pipelines.run_extract \
-  --config configs/extract.yaml \
-  --num_workers 8
-```
-
-### 2. Feature Statistics
+Run the entire pipeline (segment → extract → statistics):
 
 ```bash 
-python -m h5radiomics.pipelines.run_statistics \
-  --config configs/statistics.yaml
-```
-
-### 3. Cell Segmentation (CellViT)
-
-```bash
-python -m h5radiomics.pipelines.run_segment \
-  --config configs/segment.yaml
-```
-
-### 4. Full Pipeline (Recommended)
-
-Run the entire pipeline (extract → statistics → segment):
-
-```bash 
-python -m h5radiomics.pipelines.run_full \
-  --config configs/full.yaml
+python -m h5radiomics.run \
+  --config configs/fast_full_extract.yaml
 ```
 
 Optional: 
@@ -144,7 +124,7 @@ Optional:
 
     data/outputs/
     └── {sample_id}/
-        ├── patches/
+        ├── patches/   # only for save_patches: true
         │   ├── color/
         │   ├── gray/
         │   ├── mask/
@@ -162,125 +142,23 @@ Optional:
         │   │   ├── processing_stats.csv
         │   │   └── processing_config.json
         │   │
-        │   └── statistics/
+        │   └── statistics/  
         │       ├── raw/
         │       │   ├── stats.csv
         │       │   ├── stats.parquet
-        │       │   ├── representative/
-        │       │   └── boxplots/
+        │       │   ├── representative/  # only for save_representatives: true 
+        │       │   └── boxplots/        # only for save_boxplot: true
         │       │
         │       └── processed/
         │           ├── stats.csv
         │           ├── stats.parquet
-        │           ├── representative/
-        │           └── boxplots/
+        │           ├── representative/  # only for save_representatives: true 
+        │           └── boxplots/        # only for save_boxplot: true
         │
         └── cellvitseg/
             ├── cellseg.geojson
             ├── cellseg.parquet
             ├── metadata.csv
             ├── summary.json
-            └── overlay/
-
----
-
-## Data Inspection
-
-You can verify whether your dataset and pipeline outputs are correctly formatted using the inspection tool.
-
-### Inspect H5 inputs and outputs
-
-```bash
-python -m h5radiomics.pipelines.run_inspection \
-  --data_root data \
-  --all
-```
-
-### Inspect only H5 inputs
-
-```bash
-python -m h5radiomics.pipelines.run_inspection \
-  --data_root data \
-  --h5input
-```
-
-### Inspect only outputs
-
-```bash 
-python -m h5radiomics.pipelines.run_inspection \
-  --data_root data \
-  --output
-```
-
-### Inspect specific samples
-
-```bash 
-python -m h5radiomics.pipelines.run_inspection \
-  --data_root data \
-  --all \
-  --sample_ids TENX99 TENX95
-```
-
-### Save inspection results as JSON
-
-```bash 
-python -m h5radiomics.pipelines.run_inspection \
-  --data_root data \
-  --all \
-  --save_json inspection_report.json
-```
-
-### What it checks
-
-- H5 input
-  - Required keys (`img/imgs/images`)
-  - Image shape format
-  - Optional metadata (`coords`, `barcodes`)
-  - Number of patches
-- Outputs
-  - Directory structure correctness
-  - Presence of required files for each stage:
-    - extract
-    - processed features
-    - statistics (raw / processed)
-    - segmentation (CellViT)
-  - Stage completion status:
-    - `extract_done`
-    - `processed_done`
-    - `statistics_raw_done`
-    - `statistics_processed_done`
-    - `segment_done`
-
-This tool helps ensure that your pipeline results are complete, consistent, and reproducible.
-
----
-
-## Key Features
-
-- PyRadiomics-based feature extraction
-- Patch-level processing from HDF5
-- Multi-processing for scalability
-- Structured feature preprocessing (clipping + normalization)
-- Raw vs processed feature separation
-- Detailed feature statistics and visualization
-- Representative patch selection (quantile-based)
-- Cell segmentation with CellViT
-- Standardized and reproducible output structure
-
-### Design Philosophy
-
-This pipeline is designed with:
-
-- Modularity: Separate engines for extract / statistics / segmentation
-- Reproducibility: All processing steps are saved with configs and metadata
-- Scalability: Multi-process support for large-scale WSI datasets
-- Consistency: Unified directory structure across all samples
-
-### Future Extensions
-
-- Feature embedding (TransTab / PCA / UMAP)
-- Clustering and phenotype discovery
-- Feature selection and importance analysis
-- Integration with downstream ML models
-
+            └── overlay/        # only for save_png_overlay: true
 
