@@ -39,7 +39,7 @@ image_type_settings:
     sigma: [1.0, 2.0, 3.0]
 
 num_workers: 16
-save_patches: false  
+save_patches: true   
 
 # cellseg-based extraction
 mask_source: cellseg          # threshold | cellseg
@@ -63,7 +63,7 @@ save_per_sample: true
 save_merged: false
 
 # save_representatives: true
-save_representatives: false 
+save_representatives: true  
 representative_image_col: color_path
 representative_stats:
   - min
@@ -84,6 +84,7 @@ model_dir: /root/workspace/hest-radiomics/data/models
 model_name: CellViT-SAM-H-x20.pth
 
 batch_size: 8
+# num_workers: 0
 device: cuda:0
 
 # segment용 worker와 extract용 worker가 같은 키(num_workers)를 공유하면 충돌할 수 있음.
