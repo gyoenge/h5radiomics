@@ -61,12 +61,13 @@ def build_hest_allow_patterns(
     return allow_patterns
 
 
-def download_hest(
+def download_hest_by_oncotree(
     download_dir: str | Path,
     metadata_uri: str = "hf://datasets/MahmoodLab/hest/HEST_v1_3_0.csv",
 ) -> None:
-    print("Loading HEST metadata: %s", metadata_uri)
+    download_dir = Path(download_dir)
 
+    print("Loading HEST metadata:", metadata_uri)
     meta_df = pd.read_csv(metadata_uri)
 
     meta_df = meta_df[
@@ -75,40 +76,46 @@ def download_hest(
         & (meta_df["st_technology"].isin(DOWNLOAD_TECH))
     ]
 
-    sample_ids = meta_df["id"].astype(str).tolist()
+    for oncotree_code in DOWNLOAD_ONCOTREE:
+        oncotree_df = meta_df[meta_df["oncotree_code"] == oncotree_code]
 
-    allow_patterns = build_hest_allow_patterns(
-        sample_ids=sample_ids,
-        required_dirs=DOWNLOAD_REQUIRED,
-        allowed_dirs=DOWNLOAD_OPTIONAL,
-    )
+        if oncotree_df.empty:
+            print(f"[SKIP] No samples found for {oncotree_code}")
+            continue
 
-    ensure_dir(download_dir)
+        sample_ids = oncotree_df["id"].astype(str).tolist()
 
-    print("Start downloading HEST")
-    print("download_dir=%s", download_dir)
-    print("oncotree=%s", DOWNLOAD_ONCOTREE)
-    print("technology=%s", DOWNLOAD_TECH)
-    print("target_dirs=%s", [*DOWNLOAD_REQUIRED, *DOWNLOAD_OPTIONAL])
-    print("num_samples=%d", len(sample_ids))
+        allow_patterns = build_hest_allow_patterns(
+            sample_ids=sample_ids,
+            required_dirs=DOWNLOAD_REQUIRED,
+            allowed_dirs=DOWNLOAD_OPTIONAL,
+        )
 
-    snapshot_download(
-        repo_id="MahmoodLab/hest",
-        repo_type="dataset",
-        local_dir=str(download_dir),
-        allow_patterns=allow_patterns,
-    )
+        oncotree_dir = ensure_dir(download_dir / oncotree_code)
 
-    print("Completed downloading HEST")
-    print("Downloaded IDs: %s", sample_ids)
+        print(f"\nStart downloading HEST | oncotree={oncotree_code}")
+        print("download_dir:", oncotree_dir)
+        print("num_samples:", len(sample_ids))
+        print("sample_ids:", sample_ids)
+
+        snapshot_download(
+            repo_id="MahmoodLab/hest",
+            repo_type="dataset",
+            local_dir=str(oncotree_dir),
+            allow_patterns=allow_patterns,
+        )
+
+        print(f"Completed downloading HEST | oncotree={oncotree_code}")
 
 
-def run_download(download_root: str | Path,) -> None:
+def run_download(download_root: str | Path) -> None:
     download_root = Path(download_root)
 
     huggingface_checkin()
 
-    download_hest(download_dir=download_root / "hest",)
+    download_hest_by_oncotree(
+        download_dir=download_root / "hest",
+    )
 
     print("All download tasks completed")
 
