@@ -1,5 +1,8 @@
 # py
 __pycache__
 
+# env
+.env 
+
 # data 
 data 
