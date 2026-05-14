@@ -243,3 +243,5 @@ models/*
 # test notebook 
 */test.ipynb
 test/
+
+# data 
