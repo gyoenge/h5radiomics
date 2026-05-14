@@ -137,24 +137,6 @@ def check_arg(value: str, name: str, candidates: Sequence[str]) -> None:
         raise ValueError(f"{name} must be one of {candidates}, got: {value}")
 
 
-def load_h5ad_list(
-    adata_dir: str | Path,
-    sample_files: Sequence[str],
-) -> list[sc.AnnData]:
-    adata_list = []
-
-    for sample_file in sample_files:
-        sample_path = Path(adata_dir) / sample_file
-
-        if not sample_path.exists():
-            raise FileNotFoundError(f"h5ad not found: {sample_path}")
-
-        print("Loading h5ad: %s", sample_path)
-        adata_list.append(sc.read_h5ad(sample_path))
-
-    return adata_list
-
-
 def get_common_genes(
     adata_list: Sequence[sc.AnnData],
     min_cells_pct: float,
@@ -219,51 +201,78 @@ def select_top_k_genes(
     return genes
 
 
+def load_all_h5ad_from_dir(
+    adata_dir: str | Path,
+) -> list[sc.AnnData]:
+    adata_dir = Path(adata_dir)
+
+    h5ad_files = sorted(adata_dir.glob("*.h5ad"))
+    if not h5ad_files:
+        raise FileNotFoundError(f"No h5ad files found in: {adata_dir}")
+
+    adata_list = []
+
+    for h5ad_path in h5ad_files:
+        print(f"Loading h5ad: {h5ad_path}")
+        adata_list.append(sc.read_h5ad(h5ad_path))
+
+    return adata_list
+
+
 def run_gene_extraction(
     download_root: str | Path,
-    sample_files: Sequence[str] = ("TENX95.h5ad", "TENX99.h5ad"),
+    oncotree_codes: Sequence[str] = DOWNLOAD_ONCOTREE,
     k_values: Sequence[int] = (50, 100, 250),
     criteria_values: Sequence[str] = ("var",),
     min_cells_pct: float = 0.1,
 ) -> None:
     download_root = Path(download_root)
 
-    adata_dir = download_root / "adata"
-    save_dir = ensure_dir(download_root / "genes")
-
-    adata_list = load_h5ad_list(
-        adata_dir=adata_dir,
-        sample_files=sample_files,
-    )
-
     summary = []
 
-    for criteria in criteria_values:
-        for k in k_values:
-            print("Extracting genes | criteria=%s | k=%d", criteria, k)
+    for oncotree_code in oncotree_codes:
+        oncotree_dir = download_root / "hest" / oncotree_code
+        st_dir = oncotree_dir / "st"
+        save_dir = ensure_dir(oncotree_dir / "genes")
 
-            genes = select_top_k_genes(
-                adata_list=adata_list,
-                k=k,
-                criteria=criteria,
-                min_cells_pct=min_cells_pct,
-            )
+        if not st_dir.exists():
+            print(f"[SKIP] st directory not found: {st_dir}")
+            continue
 
-            save_path = save_dir / f"{criteria}_{k}genes.json"
-            save_json(save_path, {"genes": genes})
+        print(f"\n[Gene Extraction] ONCOTREE={oncotree_code}")
+        print(f"st_dir={st_dir}")
+        print(f"save_dir={save_dir}")
 
-            summary.append(
-                {
-                    "criteria": criteria,
-                    "k": k,
-                    "num_genes": len(genes),
-                    "save_path": str(save_path),
-                }
-            )
+        adata_list = load_all_h5ad_from_dir(st_dir)
 
-            print("Saved gene list: %s", save_path)
+        for criteria in criteria_values:
+            for k in k_values:
+                print(f"Extracting genes | oncotree={oncotree_code} | criteria={criteria} | k={k}")
 
-    save_json(download_root / "gene_extraction_summary.json", summary)
+                genes = select_top_k_genes(
+                    adata_list=adata_list,
+                    k=k,
+                    criteria=criteria,
+                    min_cells_pct=min_cells_pct,
+                )
+
+                save_path = save_dir / f"{criteria}_{k}genes.json"
+                save_json(save_path, {"genes": genes})
+
+                summary.append(
+                    {
+                        "oncotree_code": oncotree_code,
+                        "criteria": criteria,
+                        "k": k,
+                        "num_genes": len(genes),
+                        "st_dir": str(st_dir),
+                        "save_path": str(save_path),
+                    }
+                )
+
+                print(f"Saved gene list: {save_path}")
+
+    save_json(download_root / "hest" / "gene_extraction_summary.json", summary)
     print("Gene extraction finished")
 
 
@@ -271,12 +280,12 @@ def run_gene_extraction(
 
 
 if __name__ == "__main__":
-    run_download(
-        download_root=DOWNLOAD_ROOT,
-    )
-
-    # run_gene_extraction(
+    # run_download(
     #     download_root=DOWNLOAD_ROOT,
     # )
+
+    run_gene_extraction(
+        download_root=DOWNLOAD_ROOT,
+    )
 
     print("Pipeline finished successfully")
