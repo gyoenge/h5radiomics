@@ -280,9 +280,9 @@ def run_gene_extraction(
 
 
 if __name__ == "__main__":
-    # run_download(
-    #     download_root=DOWNLOAD_ROOT,
-    # )
+    run_download(
+        download_root=DOWNLOAD_ROOT,
+    )
 
     run_gene_extraction(
         download_root=DOWNLOAD_ROOT,
