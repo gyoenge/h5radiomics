@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61,<66", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hestradiomics"
+version = "1.0.0"
+description = "Pipeline for radiomics feature extraction and analysis from H5-based WSI patches."
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24,<2.0.0",
+    "pandas>=1.5",
+    "pyyaml",
+    "h5py",
+    "Pillow",
+    "SimpleITK",
+    "pyradiomics==3.0.1",
+    "matplotlib",
+    "tqdm",
+    "shapely",
+    "geopandas",
+    "opencv-python",
+    "gdown",
+    "pyarrow",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
