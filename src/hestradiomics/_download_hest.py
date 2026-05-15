@@ -14,6 +14,7 @@ from huggingface_hub import HfApi, login, snapshot_download
 from hestradiomics._utils import ensure_dir 
 from hestradiomics.config import (
     DOWNLOAD_ROOT, 
+    DOWNLOAD_SUBROOT, 
     DOWNLOAD_ONCOTREE, 
     DOWNLOAD_REQUIRED,
     DOWNLOAD_OPTIONAL, 
@@ -114,7 +115,7 @@ def run_download(download_root: str | Path) -> None:
     huggingface_checkin()
 
     download_hest_by_oncotree(
-        download_dir=download_root / "hest",
+        download_dir=download_root / DOWNLOAD_SUBROOT,
     )
 
     print("All download tasks completed")
@@ -231,7 +232,7 @@ def run_gene_extraction(
     summary = []
 
     for oncotree_code in oncotree_codes:
-        oncotree_dir = download_root / "hest" / oncotree_code
+        oncotree_dir = download_root / DOWNLOAD_SUBROOT / oncotree_code
         st_dir = oncotree_dir / "st"
         save_dir = ensure_dir(oncotree_dir / "genes")
 
@@ -272,7 +273,7 @@ def run_gene_extraction(
 
                 print(f"Saved gene list: {save_path}")
 
-    save_json(download_root / "hest" / "gene_extraction_summary.json", summary)
+    save_json(download_root / DOWNLOAD_SUBROOT / "gene_extraction_summary.json", summary)
     print("Gene extraction finished")
 
 

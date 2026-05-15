@@ -6,6 +6,7 @@ RUN_STATISTICS = True  # Requires all previous (Optional)
 
 ### HEST dataset download setting 
 DOWNLOAD_ROOT = "./data"
+DOWNLOAD_SUBROOT = "hest"
 DOWNLOAD_ONCOTREE = [
     "IDC", 
     "SKCM",
