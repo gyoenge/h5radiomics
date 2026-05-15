@@ -9,7 +9,7 @@ DOWNLOAD_ROOT = "./data"
 DOWNLOAD_ONCOTREE = [
     "IDC", 
     "SKCM",
-    "LUNG",
+    "LUAD",
     "PAAD", 
     "COAD", 
 ]
