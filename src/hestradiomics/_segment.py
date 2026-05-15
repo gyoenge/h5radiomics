@@ -29,19 +29,15 @@ from hestradiomics.utils.h5 import ensure_uint8_rgb
 # Paths / Constants
 # ============================================================
 
-DATA_ROOT = "/root/workspace/hest-radiomics/data/hest/IDC"
-SAMPLE_ID = "NCBI783"
+HEST_ROOT = "/root/workspace/hest-radiomics/data/hest"
 
-PATCH_H5_PATH = f"{DATA_ROOT}/patches/{SAMPLE_ID}.h5"
-
-SEGMENT_DIR = f"{DATA_ROOT}/segment"
-SEGMENT_VIS_DIR = f"{DATA_ROOT}/segment_vis"
-
-SEG_H5_PATH = f"{SEGMENT_DIR}/{SAMPLE_ID}.h5"
-SUMMARY_JSON_PATH = f"{SEGMENT_DIR}/{SAMPLE_ID}.summary.json"
-CELLVIT_RUNTIME_DIR = f"{SEGMENT_DIR}/_cellvit_runtime"
-
-OVERLAY_DIR = f"{SEGMENT_VIS_DIR}/{SAMPLE_ID}"
+DOWNLOAD_ONCOTREE = [
+    "IDC",
+    "SKCM",
+    "LUAD",
+    "PAAD",
+    "COAD",
+]
 
 MODEL_NAME = "CellViT-SAM-H-x20.pth"
 MODEL_PATH = f"/root/workspace/hest-radiomics/models/{MODEL_NAME}"
@@ -50,6 +46,12 @@ DEVICE = "cuda:0"
 BATCH_SIZE = 8
 NUM_WORKERS = 0
 USE_CLASS_COLOR = True
+
+RUN_SEGMENT = True
+RUN_OVERLAY = True
+
+OVERWRITE_SEGMENT = False
+OVERWRITE_OVERLAY = False
 
 
 MODEL_SRC_MAP = {
@@ -1134,7 +1136,204 @@ def save_overlays_from_cellseg_h5(
 
 
 # ============================================================
+# Multi-oncotree wrappers
+# ============================================================
 
+def list_sample_ids_from_patches(oncotree_root: str) -> List[str]:
+    patches_dir = os.path.join(oncotree_root, "patches")
+
+    if not os.path.isdir(patches_dir):
+        print(f"[WARN] patches dir not found: {patches_dir}")
+        return []
+
+    sample_ids = []
+
+    for filename in sorted(os.listdir(patches_dir)):
+        if filename.endswith(".h5"):
+            sample_ids.append(os.path.splitext(filename)[0])
+
+    return sample_ids
+
+
+def build_sample_paths(
+    hest_root: str,
+    oncotree: str,
+    sample_id: str,
+) -> Dict[str, str]:
+    data_root = os.path.join(hest_root, oncotree)
+
+    segment_dir = os.path.join(data_root, "segment")
+    segment_vis_dir = os.path.join(data_root, "segment_vis")
+
+    return {
+        "data_root": data_root,
+        "patch_h5_path": os.path.join(data_root, "patches", f"{sample_id}.h5"),
+        "segment_dir": segment_dir,
+        "segment_vis_dir": segment_vis_dir,
+        "seg_h5_path": os.path.join(segment_dir, f"{sample_id}.h5"),
+        "summary_json_path": os.path.join(segment_dir, f"{sample_id}.summary.json"),
+        "runtime_dir": os.path.join(segment_dir, "_cellvit_runtime"),
+        "overlay_dir": os.path.join(segment_vis_dir, sample_id),
+    }
+
+
+def segment_one_sample(
+    hest_root: str,
+    oncotree: str,
+    sample_id: str,
+    model_path: str,
+    batch_size: int = 8,
+    num_workers: int = 0,
+    device: str = "cuda:0",
+    overwrite: bool = False,
+) -> Optional[str]:
+    paths = build_sample_paths(
+        hest_root=hest_root,
+        oncotree=oncotree,
+        sample_id=sample_id,
+    )
+
+    patch_h5_path = paths["patch_h5_path"]
+    seg_h5_path = paths["seg_h5_path"]
+
+    if not os.path.exists(patch_h5_path):
+        print(f"[WARN] patch h5 not found: {patch_h5_path}")
+        return None
+
+    if os.path.exists(seg_h5_path) and not overwrite:
+        print(f"[SKIP] segment exists: {seg_h5_path}")
+        return seg_h5_path
+
+    print("=" * 80)
+    print(f"[SEGMENT] oncotree={oncotree}, sample_id={sample_id}")
+    print(f"[INPUT]   {patch_h5_path}")
+    print(f"[OUTPUT]  {seg_h5_path}")
+    print("=" * 80)
+
+    return segment_h5_patches_with_cellvit(
+        h5_path=patch_h5_path,
+        seg_h5_path=seg_h5_path,
+        model_path=model_path,
+        runtime_dir=paths["runtime_dir"],
+        summary_json_path=paths["summary_json_path"],
+        batch_size=batch_size,
+        num_workers=num_workers,
+        device=device,
+    )
+
+
+def save_overlay_one_sample(
+    hest_root: str,
+    oncotree: str,
+    sample_id: str,
+    use_class_color: bool = True,
+    overwrite: bool = False,
+) -> Optional[str]:
+    paths = build_sample_paths(
+        hest_root=hest_root,
+        oncotree=oncotree,
+        sample_id=sample_id,
+    )
+
+    patch_h5_path = paths["patch_h5_path"]
+    seg_h5_path = paths["seg_h5_path"]
+    overlay_dir = paths["overlay_dir"]
+
+    if not os.path.exists(patch_h5_path):
+        print(f"[WARN] patch h5 not found: {patch_h5_path}")
+        return None
+
+    if not os.path.exists(seg_h5_path):
+        print(f"[WARN] segment h5 not found: {seg_h5_path}")
+        return None
+
+    if os.path.isdir(overlay_dir) and len(os.listdir(overlay_dir)) > 0 and not overwrite:
+        print(f"[SKIP] overlay exists: {overlay_dir}")
+        return overlay_dir
+
+    print("=" * 80)
+    print(f"[OVERLAY] oncotree={oncotree}, sample_id={sample_id}")
+    print(f"[SEG]     {seg_h5_path}")
+    print(f"[OUTPUT]  {overlay_dir}")
+    print("=" * 80)
+
+    save_overlays_from_cellseg_h5(
+        source_h5_path=patch_h5_path,
+        seg_h5_path=seg_h5_path,
+        overlay_dir=overlay_dir,
+        use_class_color=use_class_color,
+    )
+
+    return overlay_dir
+
+
+def segment_all_oncotrees(
+    hest_root: str,
+    oncotrees: List[str],
+    model_path: str,
+    batch_size: int = 8,
+    num_workers: int = 0,
+    device: str = "cuda:0",
+    overwrite: bool = False,
+) -> List[str]:
+    output_paths = []
+
+    for oncotree in oncotrees:
+        oncotree_root = os.path.join(hest_root, oncotree)
+        sample_ids = list_sample_ids_from_patches(oncotree_root)
+
+        print(f"[INFO] {oncotree}: {len(sample_ids)} samples")
+
+        for sample_id in sample_ids:
+            seg_h5_path = segment_one_sample(
+                hest_root=hest_root,
+                oncotree=oncotree,
+                sample_id=sample_id,
+                model_path=model_path,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                device=device,
+                overwrite=overwrite,
+            )
+
+            if seg_h5_path is not None:
+                output_paths.append(seg_h5_path)
+
+    return output_paths
+
+
+def save_overlays_all_oncotrees(
+    hest_root: str,
+    oncotrees: List[str],
+    use_class_color: bool = True,
+    overwrite: bool = False,
+) -> List[str]:
+    output_dirs = []
+
+    for oncotree in oncotrees:
+        oncotree_root = os.path.join(hest_root, oncotree)
+        sample_ids = list_sample_ids_from_patches(oncotree_root)
+
+        print(f"[INFO] {oncotree}: {len(sample_ids)} samples")
+
+        for sample_id in sample_ids:
+            overlay_dir = save_overlay_one_sample(
+                hest_root=hest_root,
+                oncotree=oncotree,
+                sample_id=sample_id,
+                use_class_color=use_class_color,
+                overwrite=overwrite,
+            )
+
+            if overlay_dir is not None:
+                output_dirs.append(overlay_dir)
+
+    return output_dirs
+
+
+# ============================================================
+# Main
+# ============================================================
 
 if __name__ == "__main__":
     verify_or_download_model(
@@ -1142,21 +1341,29 @@ if __name__ == "__main__":
         model_name=MODEL_NAME,
     )
 
-    seg_h5_path = segment_h5_patches_with_cellvit(
-        h5_path=PATCH_H5_PATH,
-        seg_h5_path=SEG_H5_PATH,
-        model_path=MODEL_PATH,
-        runtime_dir=CELLVIT_RUNTIME_DIR,
-        summary_json_path=SUMMARY_JSON_PATH,
-        batch_size=BATCH_SIZE,
-        num_workers=NUM_WORKERS,
-        device=DEVICE,
-    )
+    segment_paths: List[str] = []
+    overlay_dirs: List[str] = []
 
-    save_overlays_from_cellseg_h5(
-        source_h5_path=PATCH_H5_PATH,
-        seg_h5_path=seg_h5_path,
-        overlay_dir=OVERLAY_DIR,
-        use_class_color=USE_CLASS_COLOR,
-    )
+    if RUN_SEGMENT:
+        segment_paths = segment_all_oncotrees(
+            hest_root=HEST_ROOT,
+            oncotrees=DOWNLOAD_ONCOTREE,
+            model_path=MODEL_PATH,
+            batch_size=BATCH_SIZE,
+            num_workers=NUM_WORKERS,
+            device=DEVICE,
+            overwrite=OVERWRITE_SEGMENT,
+        )
+
+    if RUN_OVERLAY:
+        overlay_dirs = save_overlays_all_oncotrees(
+            hest_root=HEST_ROOT,
+            oncotrees=DOWNLOAD_ONCOTREE,
+            use_class_color=USE_CLASS_COLOR,
+            overwrite=OVERWRITE_OVERLAY,
+        )
+
+    print("[INFO] all done")
+    print(f"[INFO] segmented samples: {len(segment_paths)}")
+    print(f"[INFO] overlay dirs: {len(overlay_dirs)}")
 
