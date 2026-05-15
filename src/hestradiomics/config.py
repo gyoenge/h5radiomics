@@ -1,6 +1,7 @@
 ### Run setting (All True for Full Pipeline)
 RUN_HEST_DOWNLOAD = True 
-RUN_CELL_SEGMENT = True  # Requires previous RUN_HEST_DOWNLOAD
+RUN_SEGMENT = True
+RUN_OVERLAY = True
 RUN_RADIOMICS_EXTRACTION = True  # Requires previous RUN_HEST_DOWNLOAD & RUN_CELL_SEGMENT
 RUN_STATISTICS = True  # Requires all previous (Optional)
 
@@ -30,8 +31,16 @@ DOWNLOAD_TECH = [
 ]
 
 ### Cell-segment setting
+MODEL_NAME = "CellViT-SAM-H-x20.pth"
+MODEL_PATH = f"./models/{MODEL_NAME}"
 
+DEVICE = "cuda:0"
+BATCH_SIZE = 8
+NUM_WORKERS = 0
+USE_CLASS_COLOR = True
 
+OVERWRITE_SEGMENT = False
+OVERWRITE_OVERLAY = False
 
 ### Extraction setting  
 

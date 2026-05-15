@@ -23,36 +23,28 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from hestradiomics.utils.h5 import ensure_uint8_rgb
+from hestradiomics.config import (
+    DOWNLOAD_ROOT, 
+    DOWNLOAD_SUBROOT, 
+    DOWNLOAD_ONCOTREE, 
+    RUN_SEGMENT, 
+    RUN_OVERLAY, 
+    MODEL_NAME, 
+    MODEL_PATH, 
+    DEVICE, 
+    BATCH_SIZE, 
+    NUM_WORKERS, 
+    USE_CLASS_COLOR, 
+    OVERWRITE_SEGMENT, 
+    OVERWRITE_OVERLAY,
+)
 
 
 # ============================================================
 # Paths / Constants
 # ============================================================
 
-HEST_ROOT = "/root/workspace/hest-radiomics/data/hest"
-
-DOWNLOAD_ONCOTREE = [
-    "IDC",
-    "SKCM",
-    "LUAD",
-    "PAAD",
-    "COAD",
-]
-
-MODEL_NAME = "CellViT-SAM-H-x20.pth"
-MODEL_PATH = f"/root/workspace/hest-radiomics/models/{MODEL_NAME}"
-
-DEVICE = "cuda:0"
-BATCH_SIZE = 8
-NUM_WORKERS = 0
-USE_CLASS_COLOR = True
-
-RUN_SEGMENT = True
-RUN_OVERLAY = True
-
-OVERWRITE_SEGMENT = False
-OVERWRITE_OVERLAY = False
-
+HEST_ROOT = os.path.join(DOWNLOAD_ROOT, DOWNLOAD_SUBROOT)
 
 MODEL_SRC_MAP = {
     "CellViT-256-x20.pth": "1w99U4sxDQgOSuiHMyvS_NYBiz6ozolN2",
