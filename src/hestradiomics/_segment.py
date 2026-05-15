@@ -23,28 +23,13 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from hestradiomics.utils.h5 import ensure_uint8_rgb
-from hestradiomics.config import (
-    DOWNLOAD_ROOT, 
-    DOWNLOAD_SUBROOT, 
-    DOWNLOAD_ONCOTREE, 
-    RUN_SEGMENT, 
-    RUN_OVERLAY, 
-    MODEL_NAME, 
-    MODEL_PATH, 
-    DEVICE, 
-    BATCH_SIZE, 
-    NUM_WORKERS, 
-    USE_CLASS_COLOR, 
-    OVERWRITE_SEGMENT, 
-    OVERWRITE_OVERLAY,
-)
+from hestradiomics.config import CONFIG, DownloadConfig, CellSegmentConfig
 
 
 # ============================================================
 # Paths / Constants
 # ============================================================
 
-HEST_ROOT = os.path.join(DOWNLOAD_ROOT, DOWNLOAD_SUBROOT)
 
 MODEL_SRC_MAP = {
     "CellViT-256-x20.pth": "1w99U4sxDQgOSuiHMyvS_NYBiz6ozolN2",
@@ -1323,36 +1308,58 @@ def save_overlays_all_oncotrees(
     return output_dirs
 
 
+def segment_all_oncotrees_from_config(
+    download_cfg: DownloadConfig,
+    cellseg_cfg: CellSegmentConfig,
+) -> List[str]:
+    return segment_all_oncotrees(
+        hest_root=str(download_cfg.download_dir),
+        oncotrees=download_cfg.oncotrees,
+        model_path=str(cellseg_cfg.model_path),
+        batch_size=cellseg_cfg.batch_size,
+        num_workers=cellseg_cfg.num_workers,
+        device=cellseg_cfg.device,
+        overwrite=cellseg_cfg.overwrite_segment,
+    )
+
+
+def save_overlays_all_oncotrees_from_config(
+    download_cfg: DownloadConfig,
+    cellseg_cfg: CellSegmentConfig,
+) -> List[str]:
+    return save_overlays_all_oncotrees(
+        hest_root=str(download_cfg.download_dir),
+        oncotrees=download_cfg.oncotrees,
+        use_class_color=cellseg_cfg.use_class_color,
+        overwrite=cellseg_cfg.overwrite_overlay,
+    )
+
+
 # ============================================================
 # Main
 # ============================================================
 
 if __name__ == "__main__":
+    cfg = CONFIG
+
     verify_or_download_model(
-        model_path=MODEL_PATH,
-        model_name=MODEL_NAME,
+        model_path=str(cfg.cellseg.model_path),
+        model_name=cfg.cellseg.model_name,
     )
 
     segment_paths: List[str] = []
     overlay_dirs: List[str] = []
 
-    if RUN_SEGMENT:
-        segment_paths = segment_all_oncotrees(
-            hest_root=HEST_ROOT,
-            oncotrees=DOWNLOAD_ONCOTREE,
-            model_path=MODEL_PATH,
-            batch_size=BATCH_SIZE,
-            num_workers=NUM_WORKERS,
-            device=DEVICE,
-            overwrite=OVERWRITE_SEGMENT,
+    if cfg.run.run_segment:
+        segment_paths = segment_all_oncotrees_from_config(
+            download_cfg=cfg.download,
+            cellseg_cfg=cfg.cellseg,
         )
 
-    if RUN_OVERLAY:
-        overlay_dirs = save_overlays_all_oncotrees(
-            hest_root=HEST_ROOT,
-            oncotrees=DOWNLOAD_ONCOTREE,
-            use_class_color=USE_CLASS_COLOR,
-            overwrite=OVERWRITE_OVERLAY,
+    if cfg.run.run_overlay:
+        overlay_dirs = save_overlays_all_oncotrees_from_config(
+            download_cfg=cfg.download,
+            cellseg_cfg=cfg.cellseg,
         )
 
     print("[INFO] all done")
