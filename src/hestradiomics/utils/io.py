@@ -5,10 +5,13 @@ import os
 import re
 import numpy as np
 import pandas as pd
+from pathlib import Path 
 
 
-def ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
+def ensure_dir(path: str | Path) -> Path:
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def sanitize_filename(text) -> str:

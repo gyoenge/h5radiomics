@@ -21,10 +21,10 @@ class RunConfig:
 
 @dataclass(frozen=True)
 class DownloadConfig: 
-    root: Path = Path("./data")
+    root: Path = Path("./data").resolve()
     subroot: str = "hest"
 
-    oncotrees: list[str] = field(default_factory=lambda: [
+    oncotrees: tuple[str] = field(default_factory=lambda: [
         "IDC", 
         "SKCM",
         "LUAD", 
@@ -32,19 +32,19 @@ class DownloadConfig:
         "COAD", 
     ])
 
-    required_dirs: list[str] = field(default_factory=lambda: [
+    required_dirs: tuple[str] = field(default_factory=lambda: [
         "patches", 
         "st", 
     ])
 
-    optional_dirs: list[str] = field(default_factory=lambda: [
+    optional_dirs: tuple[str] = field(default_factory=lambda: [
         "metadata",
         "patches_vis",
         "thumbnails",
         "spatial_plots",
     ])
 
-    technologies: list[str] = field(default_factory=lambda: [
+    technologies: tuple[str] = field(default_factory=lambda: [
         # "Spatial Transcriptomics" | "Visium HD" | "Visium" | "Xenium"
         "Xenium", 
     ])
