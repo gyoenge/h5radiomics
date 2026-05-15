@@ -5,11 +5,11 @@ from typing import Dict, Any, Optional
 import os 
 import numpy as np
 from PIL import Image
-from h5radiomics.utils.io import make_base_name
-from h5radiomics.utils.h5 import (
+from .io import make_base_name
+from .h5 import (
     to_str_barcode,
 )
-from h5radiomics.utils.paths import (
+from .paths import (
     get_patch_color_dir,
     get_patch_gray_dir,
     get_patch_mask_dir,
