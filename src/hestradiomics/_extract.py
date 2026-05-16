@@ -7,7 +7,9 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
+import anndata as ad
 import h5py
+import numpy as np 
 import pandas as pd
 from tqdm import tqdm
 
@@ -216,14 +218,43 @@ def extract_radiomics(
 # save
 # ------------------------------------------------------------------------------
 
-def save_radiomics_result_as_parquet(result: dict, save_path: str | Path) -> None:
+def save_radiomics_result_as_h5ad(result: dict, save_path: str | Path) -> None:
     save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
     df = pd.DataFrame(result["rows"])
-    df.to_parquet(save_path, index=False)
 
-    print(f"[SAVE] {save_path} | rows={len(df)}")
+    obs_cols = [
+        "patch_idx",
+        "barcode",
+        "status",
+        "mask_path",
+        "patch_mask_area",
+        "cellseg_mask_area",
+        "n_cells_total",
+    ]
+
+    obs_cols = [c for c in obs_cols if c in df.columns]
+
+    feature_cols = [
+        c for c in df.columns
+        if c not in obs_cols
+        and pd.api.types.is_numeric_dtype(df[c])
+    ]
+
+    obs = df[obs_cols].copy() if obs_cols else pd.DataFrame(index=df.index)
+    X = df[feature_cols].astype(np.float32).to_numpy()
+
+    adata = ad.AnnData(
+        X=X,
+        obs=obs,
+        var=pd.DataFrame(index=feature_cols),
+    )
+
+    adata.uns["total_num_patches"] = result.get("total_num_patches")
+    adata.write_h5ad(save_path)
+
+    print(f"[SAVE] {save_path} | rows={adata.n_obs}, features={adata.n_vars}")
 
 
 # ------------------------------------------------------------------------------
@@ -285,7 +316,7 @@ def run_radiomics_extraction_for_oncotree(
 
     for h5_path in h5_paths:
         sample_id = h5_path.stem
-        save_path = output_dir / f"{sample_id}.parquet"
+        save_path = output_dir / f"{sample_id}.h5ad"
 
         if save_path.exists() and not overwrite:
             print(f"[SKIP] Already exists: {save_path}")
@@ -293,7 +324,7 @@ def run_radiomics_extraction_for_oncotree(
 
         cellseg_path = None
         if mask_source == "cellseg":
-            cellseg_path = cellseg_dir / f"{sample_id}.parquet"
+            cellseg_path = cellseg_dir / f"{sample_id}.h5"
 
             if not cellseg_path.exists():
                 print(f"[SKIP] Cellseg not found: {cellseg_path}")
@@ -315,7 +346,7 @@ def run_radiomics_extraction_for_oncotree(
             cellseg_path=str(cellseg_path) if cellseg_path is not None else None,
         )
 
-        save_radiomics_result_as_parquet(result, save_path)
+        save_radiomics_result_as_h5ad(result, save_path)
 
 
 def run_radiomics_extraction_from_config(config) -> None:
