@@ -22,7 +22,7 @@ from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from hestradiomics.utils.h5 import ensure_uint8_rgb
+from hestradiomics.utils import ensure_uint8_rgb
 from hestradiomics.config import CONFIG, DownloadConfig, CellSegmentConfig
 
 
