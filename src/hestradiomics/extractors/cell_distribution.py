@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict
 import geopandas as gpd
-from h5radiomics.engines.extractors.constants import *
+from hestradiomics.extractors.constants import *
 
 
 # ------------------------------------------------------------------------------

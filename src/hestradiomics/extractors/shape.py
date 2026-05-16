@@ -5,13 +5,13 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd 
 import SimpleITK as sitk
-from h5radiomics.engines.extractors.constants import *
-from h5radiomics.utils import (
+from hestradiomics.extractors.constants import *
+from hestradiomics.utils import (
     build_local_polygon_mask, 
     crop_patch_by_bbox, align_local_mask_to_crop, 
     normalize_class_name, strip_shape2d_prefix,  
 )
-from h5radiomics.engines.extractors.builders import (
+from hestradiomics.extractors.builders import (
     build_shape2d_extractor
 )
 

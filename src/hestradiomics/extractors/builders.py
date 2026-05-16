@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from radiomics import featureextractor  # pyright: ignore[reportMissingImports] 
-from h5radiomics.engines.extractors.constants import *
+from hestradiomics.extractors.constants import *
 
 _WORKER_EXTRACTOR_CACHE: Dict[Any, Any] = {}
 _WORKER_SHAPE_EXTRACTOR_CACHE: Dict[Any, Any] = {}

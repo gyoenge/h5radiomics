@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 import geopandas as gpd
 import numpy as np
-from h5radiomics.engines.extractors.constants import *
-from h5radiomics.utils import (
+from hestradiomics.extractors.constants import *
+from hestradiomics.utils import (
     build_threshold_mask, 
     rasterize_geometries_to_mask, 
     normalize_class_name, 
@@ -13,16 +13,16 @@ from h5radiomics.utils import (
     build_patch_row_base, 
     PatchData, 
 )
-from h5radiomics.engines.extractors import (
+from hestradiomics.extractors import (
     extract_patch_level_radiomics,
     extract_cellseg_level_radiomics,
     extract_morphology_aggregates, 
     extract_cell_type_distribution, 
 )
-from h5radiomics.engines.extractors.builders import (
+from hestradiomics.extractors.builders import (
     _get_worker_shape2d_extractor, 
 )
-from h5radiomics.engines.extractors.intensity_texture import (
+from hestradiomics.extractors.intensity_texture import (
     _add_prefix_to_keys, 
     _execute_radiomics_on_mask, 
 )

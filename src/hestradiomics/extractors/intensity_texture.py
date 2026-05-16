@@ -4,8 +4,8 @@ from typing import Any, Dict
 import geopandas as gpd
 import numpy as np
 import SimpleITK as sitk
-from h5radiomics.engines.extractors.constants import *
-from h5radiomics.utils import (
+from hestradiomics.extractors.constants import *
+from hestradiomics.utils import (
     build_threshold_mask, 
     rasterize_geometries_to_mask, 
     make_feature_prefix, 
