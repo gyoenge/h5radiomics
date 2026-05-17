@@ -223,10 +223,14 @@ def save_radiomics_result_as_h5ad(result: dict, save_path: str | Path) -> None:
     df = pd.DataFrame(result["rows"])
 
     obs_cols = [
+        "sample_id",
         "patch_idx",
         "barcode",
+        "x",
+        "y",
         "status",
         "mask_path",
+        "patch_path",
         "patch_mask_area",
         "cellseg_mask_area",
         "n_cells_total",
@@ -241,6 +245,12 @@ def save_radiomics_result_as_h5ad(result: dict, save_path: str | Path) -> None:
     ]
 
     obs = df[obs_cols].copy() if obs_cols else pd.DataFrame(index=df.index)
+
+    if "barcode" in obs.columns:
+        obs.index = obs["barcode"].astype(str)
+    else:
+        obs.index = df.index.astype(str)
+
     X = df[feature_cols].astype(np.float32).to_numpy()
 
     adata = ad.AnnData(
@@ -249,7 +259,11 @@ def save_radiomics_result_as_h5ad(result: dict, save_path: str | Path) -> None:
         var=pd.DataFrame(index=feature_cols),
     )
 
+    if all(c in df.columns for c in ["x", "y"]):
+        adata.obsm["spatial"] = df[["x", "y"]].to_numpy()
+
     adata.uns["total_num_patches"] = result.get("total_num_patches")
+    
     adata.write_h5ad(save_path)
 
     print(f"[SAVE] {save_path} | rows={adata.n_obs}, features={adata.n_vars}")
