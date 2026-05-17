@@ -148,13 +148,31 @@ def extract_radiomics(
                 image_type_settings=image_type_settings,
             )
 
+        print(f"[INIT] Building radiomics extractor: {sample_id}", flush=True)
+
+        if extractor is None:
+            extractor = build_radiomics_extractor(
+                classes=classes,
+                filters=filters,
+                label=label,
+                image_type_settings=image_type_settings,
+            )
+
+        print(f"[INIT] Building shape extractor: {sample_id}", flush=True)
         shape_extractor = build_shape2d_extractor(label=label)
 
+        print(f"[INIT] Loading cellseg: {cellseg_path}", flush=True)
         cellseg_df = (
             load_cellseg_dataframe(cellseg_path)
             if mask_source == "cellseg"
             else None
         )
+
+        if cellseg_df is not None:
+            print(
+                f"[INIT] Loaded cellseg: {sample_id} | rows={len(cellseg_df)}",
+                flush=True,
+            )
 
         with h5py.File(h5_path, "r") as f:
             img_key = get_img_key(f)
