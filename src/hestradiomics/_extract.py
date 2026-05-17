@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Optional
 
 import anndata as ad
+import geopandas as gpd
 import h5py
 import numpy as np
 import pandas as pd
+from shapely import wkt
 from tqdm import tqdm
 
 from hestradiomics.extractors import (
@@ -32,6 +34,133 @@ from hestradiomics.utils import (
 )
 
 logging.getLogger("radiomics").setLevel(logging.ERROR)
+
+
+# ------------------------------------------------------------------------------
+# cellseg helpers
+# ------------------------------------------------------------------------------
+
+def _decode_h5_scalar(v):
+    if isinstance(v, np.ndarray) and v.shape:
+        v = v[0]
+
+    if isinstance(v, bytes):
+        return v.decode("utf-8")
+
+    return str(v)
+
+
+def _empty_cellseg_gdf() -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(
+        {
+            "patch_idx": [],
+            "barcode": [],
+            "cell_id_in_patch": [],
+            "class_id": [],
+            "class_name": [],
+        },
+        geometry=[],
+        crs=None,
+    )
+
+
+def prepare_cellseg_for_fast_lookup(
+    cellseg_df: Optional[gpd.GeoDataFrame],
+) -> Optional[gpd.GeoDataFrame]:
+    if cellseg_df is None:
+        return None
+
+    if len(cellseg_df) == 0:
+        if "patch_idx" in cellseg_df.columns:
+            return cellseg_df.set_index("patch_idx", drop=False)
+        return cellseg_df
+
+    if "patch_idx" not in cellseg_df.columns:
+        raise ValueError("cellseg dataframe must contain 'patch_idx'")
+
+    if "geometry" in cellseg_df.columns:
+        cellseg_df = cellseg_df[cellseg_df.geometry.notnull()].copy()
+
+    if "class_name" in cellseg_df.columns:
+        cellseg_df["class_name"] = (
+            cellseg_df["class_name"]
+            .fillna("unknown")
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .str.replace(" ", "_", regex=False)
+        )
+    else:
+        cellseg_df["class_name"] = "unknown"
+
+    return cellseg_df.set_index("patch_idx", drop=False)
+
+
+def load_cellseg_subset_dataframe(
+    cellseg_path: str | Path,
+    patch_indices,
+) -> gpd.GeoDataFrame:
+    """
+    Load only cell segmentation rows for the given patch indices.
+
+    This prevents each multiprocessing worker from loading
+    the full sample-level cellseg dataframe.
+    """
+
+    cellseg_path = Path(cellseg_path)
+    selected_patch_ids = set(int(i) for i in patch_indices)
+
+    if not cellseg_path.exists():
+        raise FileNotFoundError(f"cellseg file not found: {cellseg_path}")
+
+    suffix = cellseg_path.suffix.lower()
+
+    if suffix == ".parquet":
+        gdf = load_cellseg_dataframe(cellseg_path)
+        gdf = gdf[gdf["patch_idx"].isin(selected_patch_ids)].copy()
+        return prepare_cellseg_for_fast_lookup(gdf)
+
+    if suffix not in {".h5", ".hdf5"}:
+        raise ValueError(f"Unsupported cellseg format: {cellseg_path}")
+
+    rows = []
+
+    with h5py.File(cellseg_path, "r") as f:
+        cells = f["cells"]
+
+        patch_idx_arr = np.asarray(cells["patch_idx"][:], dtype=np.int64)
+
+        selected_mask = np.isin(
+            patch_idx_arr,
+            np.asarray(list(selected_patch_ids), dtype=np.int64),
+        )
+
+        selected_indices = np.flatnonzero(selected_mask)
+
+        for j in selected_indices:
+            rows.append(
+                {
+                    "patch_idx": int(cells["patch_idx"][j]),
+                    "barcode": _decode_h5_scalar(cells["barcode"][j]),
+                    "cell_id_in_patch": int(cells["cell_id_in_patch"][j]),
+                    "class_id": int(cells["class_id"][j]),
+                    "class_name": _decode_h5_scalar(cells["class_name"][j]),
+                    "geometry": wkt.loads(
+                        _decode_h5_scalar(cells["geometry_wkt"][j])
+                    ),
+                }
+            )
+
+    if not rows:
+        return prepare_cellseg_for_fast_lookup(_empty_cellseg_gdf())
+
+    gdf = gpd.GeoDataFrame(
+        rows,
+        geometry="geometry",
+        crs=None,
+    )
+
+    return prepare_cellseg_for_fast_lookup(gdf)
 
 
 # ------------------------------------------------------------------------------
@@ -62,9 +191,13 @@ def process_patch_chunk(
 
     shape_extractor = get_worker_shape2d_extractor(label)
 
-    print(f"[WORKER INIT] loading cellseg: {sample_id} | pid={os.getpid()}", flush=True)
-    cellseg_df = load_cellseg_dataframe(cellseg_path)
-    print(f"[WORKER INIT] loaded cellseg: {sample_id} | pid={os.getpid()} | rows={len(cellseg_df)}", flush=True)
+    cellseg_df = None
+
+    if mask_source == "cellseg":
+        cellseg_df = load_cellseg_subset_dataframe(
+            cellseg_path=cellseg_path,
+            patch_indices=patch_indices,
+        )
 
     with h5py.File(h5_path, "r") as f:
         img_key = get_img_key(f)
@@ -96,7 +229,9 @@ def process_patch_chunk(
 
 
 def split_indices(indices, num_chunks):
+    num_chunks = max(1, int(num_chunks))
     chunk_size = math.ceil(len(indices) / num_chunks)
+
     return [
         indices[i:i + chunk_size]
         for i in range(0, len(indices), chunk_size)
@@ -134,6 +269,9 @@ def extract_radiomics(
     if mask_source == "cellseg" and not cellseg_path:
         raise ValueError("cellseg_path is required when mask_source='cellseg'")
 
+    # --------------------------------------------------------------------------
+    # Single process
+    # --------------------------------------------------------------------------
     if num_workers is None or num_workers <= 1:
         rows = []
 
@@ -151,11 +289,14 @@ def extract_radiomics(
         shape_extractor = build_shape2d_extractor(label=label)
 
         print(f"[INIT] Loading cellseg: {cellseg_path}", flush=True)
+
         cellseg_df = (
             load_cellseg_dataframe(cellseg_path)
             if mask_source == "cellseg"
             else None
         )
+
+        cellseg_df = prepare_cellseg_for_fast_lookup(cellseg_df)
 
         if cellseg_df is not None:
             print(
@@ -200,9 +341,32 @@ def extract_radiomics(
             "rows": rows,
         }
 
+    # --------------------------------------------------------------------------
+    # Multiprocessing
+    # --------------------------------------------------------------------------
     num_workers = min(num_workers, os.cpu_count() or 1)
-    chunks = split_indices(patch_indices, num_workers * 4)
+
+    num_chunks = max(
+        1,
+        min(
+            len(patch_indices),
+            num_workers * 2,
+        ),
+    )
+
+    chunks = split_indices(
+        patch_indices,
+        num_chunks,
+    )
+
     rows = []
+
+    print(
+        f"[MP] sample={sample_id} | "
+        f"workers={num_workers} | chunks={len(chunks)} | "
+        f"patches={total_num_patches}",
+        flush=True,
+    )
 
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         future_to_chunk_size = {}
@@ -299,10 +463,6 @@ def save_radiomics_result_as_h5ad(
 
     obs = df[obs_cols].copy() if obs_cols else pd.DataFrame(index=df.index)
 
-    # ------------------------------------------------------------
-    # Clean obs columns before writing h5ad
-    # ------------------------------------------------------------
-
     string_cols = [
         "sample_id",
         "barcode",
@@ -335,10 +495,6 @@ def save_radiomics_result_as_h5ad(
                 errors="coerce",
             )
 
-    # ------------------------------------------------------------
-    # Build unique obs index
-    # ------------------------------------------------------------
-
     if "patch_idx" in obs.columns:
         obs.index = [
             f"{save_path.stem}_{int(patch_idx)}"
@@ -354,10 +510,6 @@ def save_radiomics_result_as_h5ad(
 
     obs.index.name = "obs_id"
 
-    # ------------------------------------------------------------
-    # Feature matrix
-    # ------------------------------------------------------------
-
     X = df[feature_cols].apply(
         pd.to_numeric,
         errors="coerce",
@@ -368,10 +520,6 @@ def save_radiomics_result_as_h5ad(
         obs=obs,
         var=pd.DataFrame(index=feature_cols),
     )
-
-    # ------------------------------------------------------------
-    # Spatial coordinates
-    # ------------------------------------------------------------
 
     if all(c in df.columns for c in ["x", "y"]):
         spatial = df[["x", "y"]].apply(
@@ -411,19 +559,6 @@ def run_radiomics_extraction_for_oncotree(
     image_type_settings=None,
     label=EXTRACTOR_DEFAULT_LABEL,
 ) -> None:
-    """
-    Expected structure:
-
-    data_root/
-      IDC/
-        patches/
-          sample1.h5
-        cellseg/
-          sample1.h5
-        radiomics_features/
-          sample1.h5ad
-    """
-
     data_root = Path(data_root)
     oncotree_root = data_root / oncotree
 
@@ -476,7 +611,12 @@ def run_radiomics_extraction_for_oncotree(
     print(f"[SAMPLE IDS] {target_sample_ids}")
     print("=" * 80)
 
-    for h5_path in h5_paths:
+    for h5_path in tqdm(
+        h5_paths,
+        desc=f"[Samples] {oncotree}",
+        dynamic_ncols=True,
+        unit="sample",
+    ):
         sample_id = h5_path.stem
         save_path = output_dir / f"{sample_id}.h5ad"
 
@@ -528,14 +668,6 @@ def run_radiomics_extraction_for_oncotree(
 
 
 def run_radiomics_extraction_from_config(config) -> None:
-    """
-    Required:
-      config.download.download_dir
-      config.download.oncotrees
-      config.radiomics.*
-      config.sample_ids
-    """
-
     for oncotree in config.download.oncotrees:
         run_radiomics_extraction_for_oncotree(
             oncotree=oncotree,
