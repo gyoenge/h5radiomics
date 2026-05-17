@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,13 +14,18 @@ from hestradiomics.utils import (
     get_statistics_dir,
     get_statistics_csv_path,
     get_statistics_parquet_path,
+    filter_sample_ids,
 )
 
 
 # =========================
 # basic utils
 # =========================
-def load_feature_csv(csv_path: str, status_filter: Optional[str] = "ok") -> pd.DataFrame:
+
+def load_feature_csv(
+    csv_path: str,
+    status_filter: Optional[str] = "ok",
+) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
 
     if status_filter is not None and "status" in df.columns:
@@ -29,7 +34,10 @@ def load_feature_csv(csv_path: str, status_filter: Optional[str] = "ok") -> pd.D
     return df
 
 
-def get_feature_columns(df: pd.DataFrame, drop_diagnostic: bool = True) -> List[str]:
+def get_feature_columns(
+    df: pd.DataFrame,
+    drop_diagnostic: bool = True,
+) -> List[str]:
     meta_cols = {
         "patch_idx",
         "barcode",
@@ -45,49 +53,59 @@ def get_feature_columns(df: pd.DataFrame, drop_diagnostic: bool = True) -> List[
     feature_cols = [c for c in numeric_cols if c not in meta_cols]
 
     if drop_diagnostic:
-        feature_cols = [c for c in feature_cols if not c.startswith("diagnostics_")]
+        feature_cols = [
+            c for c in feature_cols
+            if not c.startswith("diagnostics_")
+        ]
 
     return feature_cols
 
 
-def compute_feature_statistics(df: pd.DataFrame, feature_cols: List[str]) -> pd.DataFrame:
+def compute_feature_statistics(
+    df: pd.DataFrame,
+    feature_cols: List[str],
+) -> pd.DataFrame:
     rows = []
 
     for col in feature_cols:
         s = pd.to_numeric(df[col], errors="coerce")
 
-        row = {
-            "feature_name": col,
-            "count": int(s.count()),
-            "nan_count": int(s.isna().sum()),
-            "mean": s.mean(),
-            "std": s.std(),
-            "min": s.min(),
-            "q01": s.quantile(0.01),
-            "q05": s.quantile(0.05),
-            "q10": s.quantile(0.10),
-            "q25": s.quantile(0.25),
-            "median": s.median(),
-            "q50": s.quantile(0.50),
-            "q75": s.quantile(0.75),
-            "q90": s.quantile(0.90),
-            "q95": s.quantile(0.95),
-            "q99": s.quantile(0.99),
-            "max": s.max(),
-            "iqr": s.quantile(0.75) - s.quantile(0.25),
-            "abs_mean": s.abs().mean(),
-            "zero_count": int((s == 0).sum()),
-            "positive_count": int((s > 0).sum()),
-            "negative_count": int((s < 0).sum()),
-        }
-        rows.append(row)
+        rows.append(
+            {
+                "feature_name": col,
+                "count": int(s.count()),
+                "nan_count": int(s.isna().sum()),
+                "mean": s.mean(),
+                "std": s.std(),
+                "min": s.min(),
+                "q01": s.quantile(0.01),
+                "q05": s.quantile(0.05),
+                "q10": s.quantile(0.10),
+                "q25": s.quantile(0.25),
+                "median": s.median(),
+                "q50": s.quantile(0.50),
+                "q75": s.quantile(0.75),
+                "q90": s.quantile(0.90),
+                "q95": s.quantile(0.95),
+                "q99": s.quantile(0.99),
+                "max": s.max(),
+                "iqr": s.quantile(0.75) - s.quantile(0.25),
+                "abs_mean": s.abs().mean(),
+                "zero_count": int((s == 0).sum()),
+                "positive_count": int((s > 0).sum()),
+                "negative_count": int((s < 0).sum()),
+            }
+        )
 
     stats_df = pd.DataFrame(rows)
     stats_df = stats_df.sort_values("feature_name").reset_index(drop=True)
     return stats_df
 
 
-def summarize_dataset(df: pd.DataFrame, feature_cols: List[str]) -> Dict[str, int]:
+def summarize_dataset(
+    df: pd.DataFrame,
+    feature_cols: List[str],
+) -> Dict[str, int]:
     return {
         "num_rows": len(df),
         "num_feature_columns": len(feature_cols),
@@ -95,7 +113,10 @@ def summarize_dataset(df: pd.DataFrame, feature_cols: List[str]) -> Dict[str, in
     }
 
 
-def save_statistics(stats_df: pd.DataFrame, output_dir: str) -> tuple[str, str]:
+def save_statistics(
+    stats_df: pd.DataFrame,
+    output_dir: str,
+) -> Tuple[str, str]:
     os.makedirs(output_dir, exist_ok=True)
 
     csv_path = os.path.join(output_dir, "stats.csv")
@@ -118,13 +139,17 @@ def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
-def resolve_patch_path(row: pd.Series, preferred_col: str = "color_path") -> Optional[str]:
+def resolve_patch_path(
+    row: pd.Series,
+    preferred_col: str = "color_path",
+) -> Optional[str]:
     candidates = [preferred_col, "color_path", "gray_path", "mask_path"]
     seen = set()
 
     for col in candidates:
         if col in seen:
             continue
+
         seen.add(col)
 
         if col in row.index:
@@ -138,8 +163,12 @@ def resolve_patch_path(row: pd.Series, preferred_col: str = "color_path") -> Opt
 # =========================
 # representative selection
 # =========================
-def get_target_stat_values(series: pd.Series) -> Optional[Dict[str, float]]:
+
+def get_target_stat_values(
+    series: pd.Series,
+) -> Optional[Dict[str, float]]:
     s = pd.to_numeric(series, errors="coerce").dropna()
+
     if len(s) == 0:
         return None
 
@@ -154,7 +183,12 @@ def get_target_stat_values(series: pd.Series) -> Optional[Dict[str, float]]:
     }
 
 
-def select_representative_row(df: pd.DataFrame, feature_col: str, target_value: float, stat_name: str):
+def select_representative_row(
+    df: pd.DataFrame,
+    feature_col: str,
+    target_value: float,
+    stat_name: str,
+):
     temp = df.copy()
     temp[feature_col] = pd.to_numeric(temp[feature_col], errors="coerce")
     temp = temp[temp[feature_col].notna()].copy()
@@ -173,6 +207,7 @@ def select_representative_row(df: pd.DataFrame, feature_col: str, target_value: 
     row = temp.loc[idx]
     actual_value = float(row[feature_col])
     abs_diff = abs(actual_value - float(target_value))
+
     return row, abs_diff
 
 
@@ -209,6 +244,7 @@ def save_representative_patches(
                 continue
 
             target_value = stat_targets[stat_name]
+
             row, abs_diff = select_representative_row(
                 df=df,
                 feature_col=feature_col,
@@ -234,7 +270,11 @@ def save_representative_patches(
                 )
                 continue
 
-            src_path = resolve_patch_path(row, preferred_col=preferred_image_col)
+            src_path = resolve_patch_path(
+                row,
+                preferred_col=preferred_image_col,
+            )
+
             if src_path is None or not os.path.exists(src_path):
                 manifest_rows.append(
                     {
@@ -243,9 +283,21 @@ def save_representative_patches(
                         "target_value": float(target_value),
                         "selected_value": float(row[feature_col]),
                         "abs_diff": float(abs_diff),
-                        "patch_idx": row["patch_idx"] if "patch_idx" in row.index else np.nan,
-                        "barcode": row["barcode"] if "barcode" in row.index else "",
-                        "sample_id": row["sample_id"] if "sample_id" in row.index else prefix,
+                        "patch_idx": (
+                            row["patch_idx"]
+                            if "patch_idx" in row.index
+                            else np.nan
+                        ),
+                        "barcode": (
+                            row["barcode"]
+                            if "barcode" in row.index
+                            else ""
+                        ),
+                        "sample_id": (
+                            row["sample_id"]
+                            if "sample_id" in row.index
+                            else prefix
+                        ),
                         "source_path": src_path if src_path is not None else "",
                         "saved_path": "",
                         "status": "missing_source_image",
@@ -261,7 +313,10 @@ def save_representative_patches(
             if src_ext == "":
                 src_ext = ".png"
 
-            out_name = f"{stat_name}__sample_{sanitize_filename(sample_id)}__patch_{patch_idx}{src_ext}"
+            out_name = (
+                f"{stat_name}__sample_{sanitize_filename(sample_id)}"
+                f"__patch_{patch_idx}{src_ext}"
+            )
             dst_path = os.path.join(feature_dir, out_name)
 
             shutil.copy2(src_path, dst_path)
@@ -285,6 +340,7 @@ def save_representative_patches(
     manifest_df = pd.DataFrame(manifest_rows)
     manifest_csv = os.path.join(rep_root, "representative_manifest.csv")
     manifest_df.to_csv(manifest_csv, index=False)
+
     print(f"[INFO] Saved representative manifest: {manifest_csv}")
     return manifest_csv
 
@@ -292,7 +348,13 @@ def save_representative_patches(
 # =========================
 # boxplots
 # =========================
-def save_sample_feature_boxplot(df: pd.DataFrame, feature_cols: List[str], output_dir: str, prefix: str):
+
+def save_sample_feature_boxplot(
+    df: pd.DataFrame,
+    feature_cols: List[str],
+    output_dir: str,
+    prefix: str,
+):
     if len(feature_cols) == 0:
         return None
 
@@ -307,6 +369,7 @@ def save_sample_feature_boxplot(df: pd.DataFrame, feature_cols: List[str], outpu
 
     for i, feature_col in enumerate(feature_cols, start=1):
         s = pd.to_numeric(df[feature_col], errors="coerce").dropna()
+
         if len(s) == 0:
             data_for_boxplot.append(np.array([np.nan]))
             continue
@@ -319,12 +382,14 @@ def save_sample_feature_boxplot(df: pd.DataFrame, feature_cols: List[str], outpu
 
         for stat_name in requested_stats:
             target_value = stat_targets[stat_name]
+
             row, _ = select_representative_row(
                 df=df,
                 feature_col=feature_col,
                 target_value=target_value,
                 stat_name=stat_name,
             )
+
             if row is None:
                 continue
 
@@ -349,7 +414,11 @@ def save_sample_feature_boxplot(df: pd.DataFrame, feature_cols: List[str], outpu
     if len(scatter_x) > 0:
         ax.scatter(scatter_x, scatter_y, s=10, alpha=0.9)
 
-    ax.set_title(f"Radiomics Feature Distribution ({prefix})\nRepresentative patch position overlay", fontsize=11)
+    ax.set_title(
+        f"Radiomics Feature Distribution ({prefix})\n"
+        f"Representative patch position overlay",
+        fontsize=11,
+    )
     ax.set_xlabel("Feature")
     ax.set_ylabel("Feature value")
 
@@ -369,8 +438,10 @@ def save_sample_feature_boxplot(df: pd.DataFrame, feature_cols: List[str], outpu
 
 def extract_feature_class(feature_name: str) -> str:
     parts = str(feature_name).split("_")
+
     if len(parts) >= 2:
         return parts[1].lower()
+
     return "unknown"
 
 
@@ -389,6 +460,7 @@ def save_sample_feature_boxplots_by_class(
     requested_stats = ["min", "q10", "q25", "q50", "q75", "q90", "max"]
 
     class_to_features = {}
+
     for col in feature_cols:
         cls = extract_feature_class(col)
         class_to_features.setdefault(cls, []).append(col)
@@ -402,6 +474,7 @@ def save_sample_feature_boxplots_by_class(
 
         for i, feature_col in enumerate(class_features, start=1):
             s = pd.to_numeric(df[feature_col], errors="coerce").dropna()
+
             if len(s) == 0:
                 data_for_boxplot.append(np.array([np.nan]))
                 continue
@@ -414,12 +487,14 @@ def save_sample_feature_boxplots_by_class(
 
             for stat_name in requested_stats:
                 target_value = stat_targets[stat_name]
+
                 row, _ = select_representative_row(
                     df=df,
                     feature_col=feature_col,
                     target_value=target_value,
                     stat_name=stat_name,
                 )
+
                 if row is None:
                     continue
 
@@ -448,7 +523,9 @@ def save_sample_feature_boxplots_by_class(
             ax.scatter(scatter_x, scatter_y, s=10, alpha=0.9)
 
         ax.set_title(
-            f"Radiomics Feature Distribution ({prefix}, {feature_class})\nRepresentative patch position overlay",
+            f"Radiomics Feature Distribution "
+            f"({prefix}, {feature_class})\n"
+            f"Representative patch position overlay",
             fontsize=11,
         )
         ax.set_xlabel("Feature")
@@ -474,15 +551,33 @@ def save_sample_feature_boxplots_by_class(
 # =========================
 # main per-table processing
 # =========================
-def process_single_feature_table(sample_id: str, config: dict, feature_type: str):
-    if feature_type not in ("raw", "processed"):
-        raise ValueError(f"feature_type must be 'raw' or 'processed', got: {feature_type}")
 
-    csv_path = get_feature_csv_path(config["output_dir"], sample_id, feature_type)
-    output_dir = get_statistics_dir(config["output_dir"], sample_id, feature_type)
+def process_single_feature_table(
+    sample_id: str,
+    config: dict,
+    feature_type: str,
+):
+    if feature_type not in ("raw", "processed"):
+        raise ValueError(
+            f"feature_type must be 'raw' or 'processed', got: {feature_type}"
+        )
+
+    csv_path = get_feature_csv_path(
+        config["output_dir"],
+        sample_id,
+        feature_type,
+    )
+    output_dir = get_statistics_dir(
+        config["output_dir"],
+        sample_id,
+        feature_type,
+    )
 
     if not os.path.exists(csv_path):
-        print(f"[WARNING] CSV not found for sample={sample_id}, feature_type={feature_type}: {csv_path}")
+        print(
+            f"[WARNING] CSV not found for sample={sample_id}, "
+            f"feature_type={feature_type}: {csv_path}"
+        )
         return None
 
     print("=" * 60)
@@ -500,21 +595,26 @@ def process_single_feature_table(sample_id: str, config: dict, feature_type: str
     )
 
     summary = summarize_dataset(df, feature_cols)
+
     print(
         f"[INFO] sample={sample_id}, feature_type={feature_type}, "
-        f"rows={summary['num_rows']}, features={summary['num_feature_columns']}"
+        f"rows={summary['num_rows']}, "
+        f"features={summary['num_feature_columns']}"
     )
 
     if len(feature_cols) == 0:
-        print(f"[WARNING] No feature columns found for sample={sample_id}, feature_type={feature_type}")
+        print(
+            f"[WARNING] No feature columns found for "
+            f"sample={sample_id}, feature_type={feature_type}"
+        )
         return None
 
     stats_df = compute_feature_statistics(df, feature_cols)
     csv_out, parquet_out = save_statistics(stats_df, output_dir)
+
     print(f"[INFO] Saved statistics CSV    : {csv_out}")
     print(f"[INFO] Saved statistics Parquet: {parquet_out}")
 
-    # representative / boxplots용 sample_id 정보 보강
     df_for_vis = df.copy()
     if "sample_id" not in df_for_vis.columns:
         df_for_vis["sample_id"] = sample_id
@@ -553,11 +653,18 @@ def process_single_feature_table(sample_id: str, config: dict, feature_type: str
     }
 
 
-def process_single_sample(sample_id: str, config: dict):
+def process_single_sample(
+    sample_id: str,
+    config: dict,
+):
     results = {}
 
     for feature_type in ("raw", "processed"):
-        result = process_single_feature_table(sample_id, config, feature_type)
+        result = process_single_feature_table(
+            sample_id=sample_id,
+            config=config,
+            feature_type=feature_type,
+        )
         results[feature_type] = result
 
     return {
@@ -570,21 +677,29 @@ def process_single_sample(sample_id: str, config: dict):
 # =========================
 # optional merged processing
 # =========================
-def process_merged_samples(results, config: dict):
+
+def process_merged_samples(
+    results,
+    config: dict,
+):
     """
     Optional merged statistics.
+
     Saves under:
       {output_dir}/_merged/statistics/raw/
       {output_dir}/_merged/statistics/processed/
     """
+
     if not config.get("save_merged", False):
         return
 
     for feature_type in ("raw", "processed"):
         collected = []
+
         for r in results:
             if r is None:
                 continue
+
             part = r.get(feature_type)
             if part is None:
                 continue
@@ -594,7 +709,10 @@ def process_merged_samples(results, config: dict):
             collected.append(temp)
 
         if len(collected) == 0:
-            print(f"[WARNING] No valid merged data for feature_type={feature_type}")
+            print(
+                f"[WARNING] No valid merged data for "
+                f"feature_type={feature_type}"
+            )
             continue
 
         merged_df = pd.concat(collected, axis=0, ignore_index=True)
@@ -604,12 +722,28 @@ def process_merged_samples(results, config: dict):
             drop_diagnostic=config["drop_diagnostic"],
         )
 
-        print(f"[INFO] Merged feature_type={feature_type}, rows={len(merged_df)}, features={len(feature_cols)}")
+        print(
+            f"[INFO] Merged feature_type={feature_type}, "
+            f"rows={len(merged_df)}, features={len(feature_cols)}"
+        )
 
-        merged_stats_df = compute_feature_statistics(merged_df, feature_cols)
+        merged_stats_df = compute_feature_statistics(
+            merged_df,
+            feature_cols,
+        )
 
-        output_dir = os.path.join(config["output_dir"], "_merged", "statistics", feature_type)
-        csv_out, parquet_out = save_statistics(merged_stats_df, output_dir)
+        output_dir = os.path.join(
+            config["output_dir"],
+            "_merged",
+            "statistics",
+            feature_type,
+        )
+
+        csv_out, parquet_out = save_statistics(
+            merged_stats_df,
+            output_dir,
+        )
+
         print(f"[INFO] Saved merged statistics CSV    : {csv_out}")
         print(f"[INFO] Saved merged statistics Parquet: {parquet_out}")
 
@@ -636,4 +770,3 @@ def process_merged_samples(results, config: dict):
                 output_dir=output_dir,
                 prefix=f"merged_{feature_type}",
             )
-
