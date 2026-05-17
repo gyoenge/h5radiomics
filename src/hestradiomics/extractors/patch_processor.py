@@ -5,6 +5,16 @@ from typing import Any, Dict, Optional
 import geopandas as gpd
 import numpy as np
 
+from hestradiomics.extractors._intensity_texture import (
+    _add_prefix_to_keys,
+    _execute_radiomics_on_mask,
+)
+from hestradiomics.extractors import (
+    extract_patch_level_radiomics,
+    extract_cellseg_level_radiomics,
+    extract_morphology_aggregates,
+    extract_cell_type_distribution,
+)
 from hestradiomics.extractors.constants import *
 from hestradiomics.utils import (
     build_threshold_mask,
@@ -15,22 +25,6 @@ from hestradiomics.utils import (
     load_patch_data,
     build_patch_row_base,
     PatchData,
-)
-
-from hestradiomics.extractors import (
-    extract_patch_level_radiomics,
-    extract_cellseg_level_radiomics,
-    extract_morphology_aggregates,
-    extract_cell_type_distribution,
-)
-
-from hestradiomics.extractors.builders import (
-    _get_worker_shape2d_extractor,
-)
-
-from hestradiomics.extractors._intensity_texture import (
-    _add_prefix_to_keys,
-    _execute_radiomics_on_mask,
 )
 
 
