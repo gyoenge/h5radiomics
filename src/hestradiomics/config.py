@@ -72,7 +72,7 @@ class CellSegmentConfig:
 
     device: str = "cuda:0"
     batch_size: int = 8 
-    num_workers: int = 0 
+    num_workers: int = 16 # 0
 
     use_class_color: bool = True 
 
