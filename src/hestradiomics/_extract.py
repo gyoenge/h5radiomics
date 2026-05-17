@@ -300,11 +300,7 @@ def save_radiomics_result_as_h5ad(
         "n_cells_total",
     ]
 
-    obs_cols = [
-        c
-        for c in obs_cols
-        if c in df.columns
-    ]
+    obs_cols = [c for c in obs_cols if c in df.columns]
 
     feature_cols = [
         c
@@ -313,19 +309,54 @@ def save_radiomics_result_as_h5ad(
         and pd.api.types.is_numeric_dtype(df[c])
     ]
 
-    obs = (
-        df[obs_cols].copy()
-        if obs_cols
-        else pd.DataFrame(index=df.index)
-    )
+    obs = df[obs_cols].copy() if obs_cols else pd.DataFrame(index=df.index)
 
-    if "barcode" in obs.columns:
-        obs["barcode"] = obs["barcode"].astype(str)
+    # ------------------------------------------------------------
+    # Clean obs columns before writing h5ad
+    # ------------------------------------------------------------
+
+    string_cols = [
+        "sample_id",
+        "barcode",
+        "status",
+        "mask_path",
+        "patch_path",
+    ]
+
+    numeric_cols = [
+        "patch_idx",
+        "x",
+        "y",
+        "patch_mask_area",
+        "cellseg_mask_area",
+        "n_cells_total",
+    ]
+
+    for col in string_cols:
+        if col in obs.columns:
+            obs[col] = (
+                obs[col]
+                .fillna("")
+                .astype(str)
+            )
+
+    for col in numeric_cols:
+        if col in obs.columns:
+            obs[col] = pd.to_numeric(
+                obs[col],
+                errors="coerce",
+            )
+
+    # ------------------------------------------------------------
+    # Build unique obs index
+    # ------------------------------------------------------------
 
     if "patch_idx" in obs.columns:
         obs.index = [
             f"{save_path.stem}_{int(patch_idx)}"
-            for patch_idx in obs["patch_idx"]
+            if pd.notna(patch_idx)
+            else f"{save_path.stem}_{i}"
+            for i, patch_idx in enumerate(obs["patch_idx"])
         ]
     else:
         obs.index = [
@@ -335,7 +366,14 @@ def save_radiomics_result_as_h5ad(
 
     obs.index.name = "obs_id"
 
-    X = df[feature_cols].astype(np.float32).to_numpy()
+    # ------------------------------------------------------------
+    # Feature matrix
+    # ------------------------------------------------------------
+
+    X = df[feature_cols].apply(
+        pd.to_numeric,
+        errors="coerce",
+    ).astype(np.float32).to_numpy()
 
     adata = ad.AnnData(
         X=X,
@@ -343,8 +381,17 @@ def save_radiomics_result_as_h5ad(
         var=pd.DataFrame(index=feature_cols),
     )
 
+    # ------------------------------------------------------------
+    # Spatial coordinates
+    # ------------------------------------------------------------
+
     if all(c in df.columns for c in ["x", "y"]):
-        adata.obsm["spatial"] = df[["x", "y"]].to_numpy()
+        spatial = df[["x", "y"]].apply(
+            pd.to_numeric,
+            errors="coerce",
+        ).to_numpy(dtype=np.float32)
+
+        adata.obsm["spatial"] = spatial
 
     adata.uns["total_num_patches"] = result.get("total_num_patches")
 
@@ -477,6 +524,14 @@ def run_radiomics_extraction_for_oncotree(
                 else None
             ),
         )
+
+        df_debug = pd.DataFrame(result["rows"])
+        print("[DEBUG] status counts")
+        print(df_debug["status"].value_counts(dropna=False))
+        print("[DEBUG] columns")
+        print(df_debug.columns.tolist()[:50])
+        print("[DEBUG] first row")
+        print(df_debug.iloc[0].to_dict())
 
         save_radiomics_result_as_h5ad(
             result=result,
