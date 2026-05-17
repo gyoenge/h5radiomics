@@ -28,7 +28,7 @@ from hestradiomics.extractors.builders import (
     _get_worker_shape2d_extractor,
 )
 
-from hestradiomics.extractors.intensity_texture import (
+from hestradiomics.extractors._intensity_texture import (
     _add_prefix_to_keys,
     _execute_radiomics_on_mask,
 )
