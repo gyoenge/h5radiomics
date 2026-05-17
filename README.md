@@ -28,7 +28,7 @@ pip install -e . --no-build-isolation
 We need `cellvit` module installation for `segment` engine: 
 ```bash
 conda install -c conda-forge openslide
-pip install openslide-python
+pip install openslide-python openslide-bin
 pip install cellvit
 ```
 
