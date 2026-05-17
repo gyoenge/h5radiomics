@@ -282,9 +282,9 @@ def run_radiomics_extraction_for_oncotree(
         patches/
           sample1.h5
         cellseg/
-          sample1.parquet
+          sample1.h5
         radiomics_features/
-          sample1.parquet
+          sample1.h5ad
     """
     data_root = Path(data_root)
     oncotree_root = data_root / oncotree
