@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field 
 from pathlib import Path 
+from typing import Optional 
 
 
 # ============================================================
@@ -13,6 +14,11 @@ class RunConfig:
     run_overlay: bool = True 
     run_radiomics_extraction: bool = True 
     run_statistics: bool = True 
+
+    # None: run all samples
+    # list/tuple: run only selected samples
+    sample_ids: Optional[tuple[str, ...]] = None
+    # sample_ids: Optional[tuple[str, ...]] = ("NCBI681", "NCBI682")
 
 
 # ============================================================
@@ -30,7 +36,7 @@ class DownloadConfig:
         # "LUAD", 
         # "PAAD", 
         # "COAD", 
-    ])
+    ])    
 
     required_dirs: tuple[str] = field(default_factory=lambda: [
         "patches", 
@@ -117,6 +123,10 @@ class PipelineConfig:
     cellseg: CellSegmentConfig = field(default_factory=CellSegmentConfig)
     radiomics: RadiomicsConfig = field(default_factory=RadiomicsConfig)
     statistics: StatisticsConfig = field(default_factory=StatisticsConfig)
+
+    @property
+    def sample_ids(self) -> Optional[tuple[str, ...]]:
+        return self.run.sample_ids
 
 
 CONFIG = PipelineConfig()

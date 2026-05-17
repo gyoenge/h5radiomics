@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -11,7 +11,7 @@ import scanpy as sc
 from dotenv import load_dotenv
 from huggingface_hub import HfApi, login, snapshot_download
 
-from hestradiomics.utils import ensure_dir
+from hestradiomics.utils import ensure_dir, filter_sample_ids
 from hestradiomics.config import CONFIG, DownloadConfig
 
 
@@ -57,6 +57,7 @@ def build_hest_allow_patterns(
 
 def download_hest_by_oncotree(
     download_cfg: DownloadConfig,
+    sample_ids: Optional[tuple[str, ...]] = None,
     metadata_uri: str = "hf://datasets/MahmoodLab/hest/HEST_v1_3_0.csv",
 ) -> None:
     download_dir = download_cfg.download_dir
@@ -77,10 +78,21 @@ def download_hest_by_oncotree(
             print(f"[SKIP] No samples found for {oncotree_code}")
             continue
 
-        sample_ids = oncotree_df["id"].astype(str).tolist()
+        all_sample_ids = oncotree_df["id"].astype(str).tolist()
+        target_sample_ids = filter_sample_ids(
+            all_sample_ids=all_sample_ids,
+            selected_sample_ids=sample_ids,
+        )
+
+        if not target_sample_ids:
+            print(
+                f"[SKIP] No selected samples found for {oncotree_code} | "
+                f"selected={sample_ids}"
+            )
+            continue
 
         allow_patterns = build_hest_allow_patterns(
-            sample_ids=sample_ids,
+            sample_ids=target_sample_ids,
             required_dirs=download_cfg.required_dirs,
             allowed_dirs=download_cfg.optional_dirs,
         )
@@ -89,8 +101,8 @@ def download_hest_by_oncotree(
 
         print(f"\nStart downloading HEST | oncotree={oncotree_code}")
         print(f"download_dir: {oncotree_dir}")
-        print(f"num_samples: {len(sample_ids)}")
-        print(f"sample_ids: {sample_ids}")
+        print(f"num_samples: {len(target_sample_ids)} / {len(all_sample_ids)}")
+        print(f"sample_ids: {target_sample_ids}")
 
         snapshot_download(
             repo_id="MahmoodLab/hest",
@@ -102,9 +114,15 @@ def download_hest_by_oncotree(
         print(f"Completed downloading HEST | oncotree={oncotree_code}")
 
 
-def run_download(download_cfg: DownloadConfig) -> None:
+def run_download(
+    download_cfg: DownloadConfig,
+    sample_ids: Optional[tuple[str, ...]] = None,
+) -> None:
     huggingface_checkin()
-    download_hest_by_oncotree(download_cfg)
+    download_hest_by_oncotree(
+        download_cfg=download_cfg,
+        sample_ids=sample_ids,
+    )
     print("All download tasks completed")
 
 
@@ -145,6 +163,9 @@ def get_common_genes(
         else:
             common_genes = np.intersect1d(common_genes, genes)
 
+    if common_genes is None:
+        return []
+
     common_genes = [
         gene for gene in common_genes
         if "BLANK" not in gene and "Control" not in gene
@@ -166,6 +187,9 @@ def select_top_k_genes(
         adata_list=adata_list,
         min_cells_pct=min_cells_pct,
     )
+
+    if not common_genes:
+        raise ValueError("No common genes found across selected samples.")
 
     expression_df = pd.concat(
         [adata.to_df()[common_genes] for adata in adata_list],
@@ -190,12 +214,25 @@ def select_top_k_genes(
 
 def load_all_h5ad_from_dir(
     adata_dir: str | Path,
+    sample_ids: Optional[tuple[str, ...]] = None,
 ) -> list[sc.AnnData]:
     adata_dir = Path(adata_dir)
 
     h5ad_files = sorted(adata_dir.glob("*.h5ad"))
+
+    if sample_ids is not None:
+        selected = set(sample_ids)
+        h5ad_files = [
+            h5ad_path
+            for h5ad_path in h5ad_files
+            if h5ad_path.stem in selected
+        ]
+
     if not h5ad_files:
-        raise FileNotFoundError(f"No h5ad files found in: {adata_dir}")
+        raise FileNotFoundError(
+            f"No selected h5ad files found in: {adata_dir} | "
+            f"sample_ids={sample_ids}"
+        )
 
     adata_list = []
 
@@ -208,6 +245,7 @@ def load_all_h5ad_from_dir(
 
 def run_gene_extraction(
     download_cfg: DownloadConfig,
+    sample_ids: Optional[tuple[str, ...]] = None,
     k_values: Sequence[int] = (50, 100, 250),
     criteria_values: Sequence[str] = ("var",),
     min_cells_pct: float = 0.1,
@@ -226,8 +264,16 @@ def run_gene_extraction(
         print(f"\n[Gene Extraction] ONCOTREE={oncotree_code}")
         print(f"st_dir={st_dir}")
         print(f"save_dir={save_dir}")
+        print(f"selected_sample_ids={sample_ids}")
 
-        adata_list = load_all_h5ad_from_dir(st_dir)
+        try:
+            adata_list = load_all_h5ad_from_dir(
+                st_dir,
+                sample_ids=sample_ids,
+            )
+        except FileNotFoundError as e:
+            print(f"[SKIP] {e}")
+            continue
 
         for criteria in criteria_values:
             for k in k_values:
@@ -253,6 +299,11 @@ def run_gene_extraction(
                         "criteria": criteria,
                         "k": k,
                         "num_genes": len(genes),
+                        "selected_sample_ids": (
+                            list(sample_ids)
+                            if sample_ids is not None
+                            else None
+                        ),
                         "st_dir": str(st_dir),
                         "save_path": str(save_path),
                     }
@@ -270,8 +321,14 @@ if __name__ == "__main__":
     cfg = CONFIG
 
     if cfg.run.run_hest_download:
-        run_download(cfg.download)
+        run_download(
+            download_cfg=cfg.download,
+            sample_ids=cfg.sample_ids,
+        )
 
-    run_gene_extraction(cfg.download)
+    run_gene_extraction(
+        download_cfg=cfg.download,
+        sample_ids=cfg.sample_ids,
+    )
 
     print("Pipeline finished successfully")
