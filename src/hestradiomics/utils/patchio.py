@@ -128,25 +128,11 @@ def build_patch_row_base(
     patch: PatchData,
     output_dir: str,
     sample_id: str,
-    save_patches: bool,
 ) -> Dict[str, Any]:
-    color_path = ""
-    gray_path = ""
-
-    if save_patches:
-        color_path, gray_path = save_patch_images_once(
-            color_patch=patch.color_patch,
-            gray_patch=patch.gray_patch,
-            output_dir=output_dir,
-            sample_id=sample_id,
-            base_filename=patch.base_filename,
-        )
 
     return {
         "patch_idx": patch.patch_idx,
         "barcode": patch.barcode,
-        "color_path": color_path,
-        "gray_path": gray_path,
         "mask_path": "",
         "x": patch.coords[0] if patch.coords is not None else None,
         "y": patch.coords[1] if patch.coords is not None else None,
