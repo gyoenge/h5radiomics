@@ -22,13 +22,8 @@ from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from hestradiomics.utils import ensure_uint8_rgb
+from hestradiomics.utils import ensure_uint8_rgb, filter_sample_ids
 from hestradiomics.config import CONFIG, DownloadConfig, CellSegmentConfig
-
-
-# ============================================================
-# Paths / Constants
-# ============================================================
 
 
 MODEL_SRC_MAP = {
@@ -38,10 +33,6 @@ MODEL_SRC_MAP = {
     "CellViT-SAM-H-x20.pth": "1wP4WhHLNwyJv97AK42pWK8kPoWlrqi30",
 }
 
-
-# ============================================================
-# Utils
-# ============================================================
 
 def infer_cellvit_model_type(model_name: str) -> str:
     name = model_name.upper()
@@ -143,10 +134,6 @@ def verify_or_download_model(model_path: str, model_name: str):
     )
 
 
-# ============================================================
-# Dataset
-# ============================================================
-
 class H5PatchDataset(Dataset):
     def __init__(
         self,
@@ -202,10 +189,6 @@ def collate_patches(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-# ============================================================
-# CellViT Adapter
-# ============================================================
-
 class CellViTInferenceAdapter:
     def __init__(
         self,
@@ -230,16 +213,6 @@ class CellViTInferenceAdapter:
         os.makedirs(self._tmp_root, exist_ok=True)
 
         self.runner = self._build_runner(CellViTInference, SystemConfiguration)
-
-        debug_print(
-            self.verbose,
-            "[DEBUG] runner callables:",
-            [
-                name
-                for name in dir(self.runner)
-                if not name.startswith("_") and callable(getattr(self.runner, name))
-            ],
-        )
 
     def _patch_ray_init(self):
         import ray
@@ -268,34 +241,19 @@ class CellViTInferenceAdapter:
         for name, param in sig.parameters.items():
             if name == "device":
                 kwargs[name] = self.device
-
             elif name in ("gpu", "gpu_id", "gpu_ids"):
-                if "cuda:" in self.device:
-                    gpu_id = int(self.device.split(":")[-1])
-                else:
-                    gpu_id = 0
+                gpu_id = int(self.device.split(":")[-1]) if "cuda:" in self.device else 0
                 kwargs[name] = [gpu_id] if name == "gpu_ids" else gpu_id
-
-            elif name in ("mixed_precision", "amp"):
+            elif name in ("mixed_precision", "amp", "enforce_mixed_precision"):
                 kwargs[name] = False
-
-            elif name == "enforce_mixed_precision":
-                kwargs[name] = False
-
             elif name == "batch_size":
                 kwargs[name] = 1
-
             elif name == "num_workers":
                 kwargs[name] = 0
-
             elif name == "seed":
                 kwargs[name] = 42
-
             elif name == "verbose":
                 kwargs[name] = False
-
-            elif param.default is not inspect._empty:
-                pass
 
         try:
             return SystemConfiguration(**kwargs)
@@ -311,21 +269,14 @@ class CellViTInferenceAdapter:
         for name, param in sig.parameters.items():
             if name == "model_path":
                 kwargs[name] = self.model_path
-
             elif name == "model_name":
                 kwargs[name] = self.model_name
-
             elif name == "outdir":
                 kwargs[name] = self._tmp_root
-
             elif name == "system_configuration":
                 kwargs[name] = system_configuration
-
             elif name == "device":
                 kwargs[name] = self.device
-
-            elif param.default is not inspect._empty:
-                pass
 
         return CellViTInference(**kwargs)
 
@@ -357,13 +308,6 @@ class CellViTInferenceAdapter:
             out = self.runner.model(x)
 
         out = self.runner.apply_softmax_reorder(out)
-
-        debug_print(
-            self.verbose,
-            "[DEBUG] model output keys:",
-            out.keys() if isinstance(out, dict) else type(out),
-        )
-
         type_map = self._extract_type_map_from_output(out)
 
         if isinstance(out, dict) and "instance_map" in out:
@@ -372,22 +316,14 @@ class CellViTInferenceAdapter:
             if torch.is_tensor(inst_map):
                 inst_map = inst_map.detach().cpu().numpy()
 
-            inst_map = np.asarray(inst_map, dtype=np.int32)
-
             return {
-                "instance_map": inst_map,
+                "instance_map": np.asarray(inst_map, dtype=np.int32),
                 "type_map": type_map,
             }
 
         if isinstance(out, dict) and "nuclei_binary_map" in out:
             bin_map = out["nuclei_binary_map"][0]
-
-            if torch.is_tensor(bin_map):
-                arr = bin_map.detach().cpu().numpy()
-            else:
-                arr = np.asarray(bin_map)
-
-            arr = np.asarray(arr)
+            arr = bin_map.detach().cpu().numpy() if torch.is_tensor(bin_map) else np.asarray(bin_map)
 
             if arr.ndim == 3:
                 if arr.shape[0] in (2, 3, 4):
@@ -396,29 +332,21 @@ class CellViTInferenceAdapter:
                     pred = np.argmax(arr, axis=-1)
                 else:
                     raise RuntimeError(f"Unexpected nuclei_binary_map shape: {arr.shape}")
-
             elif arr.ndim == 2:
                 pred = arr
-
             else:
                 raise RuntimeError(f"Unexpected nuclei_binary_map ndim: {arr.ndim}")
 
-            pred = np.asarray(pred)
-            pred = np.squeeze(pred)
+            pred = np.squeeze(np.asarray(pred))
 
             if pred.ndim != 2:
                 raise RuntimeError(f"pred must be 2D, got shape={pred.shape}")
 
-            fg = (pred > 0).astype(np.uint8)
-            fg = np.ascontiguousarray(fg)
-
-            num_labels, labels = cv2.connectedComponents(fg)
-            debug_print(self.verbose, "[DEBUG] connected components:", num_labels - 1)
-
-            labels = np.asarray(labels, dtype=np.int32)
+            fg = np.ascontiguousarray((pred > 0).astype(np.uint8))
+            _, labels = cv2.connectedComponents(fg)
 
             return {
-                "instance_map": labels,
+                "instance_map": np.asarray(labels, dtype=np.int32),
                 "type_map": type_map,
             }
 
@@ -437,15 +365,10 @@ class CellViTInferenceAdapter:
 
         pil_images = [Image.fromarray(img) for img in images]
 
-        result = self._try_call_method(
+        return self._try_call_method(
             ["predict_batch", "process_batch", "infer_batch", "run_batch"],
             pil_images,
         )
-
-        if result is not None:
-            return result
-
-        return None
 
     def _extract_gdf_from_any(self, raw: Any) -> Optional[gpd.GeoDataFrame]:
         if raw is None:
@@ -468,10 +391,9 @@ class CellViTInferenceAdapter:
 
             for k in ["geometry", "geometries"]:
                 if k in raw and isinstance(raw[k], list):
-                    geoms = raw[k]
                     return gpd.GeoDataFrame(
-                        {"cell_id_in_patch": list(range(len(geoms)))},
-                        geometry=geoms,
+                        {"cell_id_in_patch": list(range(len(raw[k])))},
+                        geometry=raw[k],
                         crs=None,
                     )
 
@@ -481,19 +403,11 @@ class CellViTInferenceAdapter:
         if raw is None:
             return None
 
-        if isinstance(raw, np.ndarray):
-            raw = np.asarray(raw)
-
-            if raw.ndim == 2:
-                return raw.astype(np.int32)
-
-            if raw.ndim == 3 and 1 in raw.shape:
-                raw = np.squeeze(raw)
-                if raw.ndim == 2:
-                    return raw.astype(np.int32)
-
         if torch.is_tensor(raw):
             raw = raw.detach().cpu().numpy()
+
+        if isinstance(raw, np.ndarray):
+            raw = np.asarray(raw)
 
             if raw.ndim == 2:
                 return raw.astype(np.int32)
@@ -512,25 +426,23 @@ class CellViTInferenceAdapter:
                 "nuclei_instance_map",
                 "nuclei_map",
             ]:
-                if k in raw:
-                    v = raw[k]
+                if k not in raw:
+                    continue
 
-                    if torch.is_tensor(v):
-                        v = v.detach().cpu().numpy()
+                v = raw[k]
+                if torch.is_tensor(v):
+                    v = v.detach().cpu().numpy()
 
-                    v = np.asarray(v)
+                v = np.asarray(v)
 
-                    if v.ndim == 2:
-                        return v.astype(np.int32)
-
-                    if v.ndim == 3 and v.shape[0] == 1:
-                        return v[0].astype(np.int32)
-
-                    if v.ndim == 3 and v.shape[-1] == 1:
-                        return v[..., 0].astype(np.int32)
-
-                    if v.ndim == 3:
-                        return v.astype(np.int32)
+                if v.ndim == 2:
+                    return v.astype(np.int32)
+                if v.ndim == 3 and v.shape[0] == 1:
+                    return v[0].astype(np.int32)
+                if v.ndim == 3 and v.shape[-1] == 1:
+                    return v[..., 0].astype(np.int32)
+                if v.ndim == 3:
+                    return v.astype(np.int32)
 
         return None
 
@@ -552,7 +464,6 @@ class CellViTInferenceAdapter:
                 type_map = np.argmax(type_map, axis=-1)
             else:
                 raise RuntimeError(f"Unexpected nuclei_type_map shape: {type_map.shape}")
-
         elif type_map.ndim != 2:
             raise RuntimeError(f"Unexpected nuclei_type_map ndim: {type_map.ndim}")
 
@@ -581,7 +492,6 @@ class CellViTInferenceAdapter:
         if gdf is not None:
             if "geometry" not in gdf.columns:
                 gdf = gpd.GeoDataFrame(gdf, geometry="geometry", crs=None)
-
             return gdf
 
         inst_map = None
@@ -593,50 +503,48 @@ class CellViTInferenceAdapter:
         else:
             inst_map = self._extract_instance_map_from_any(raw)
 
-        if inst_map is not None:
-            rows = []
-
-            instance_ids = np.unique(inst_map)
-            instance_ids = instance_ids[instance_ids > 0]
-
-            class_name_map = {
-                0: "background",
-                1: "neoplastic",
-                2: "inflammatory",
-                3: "connective",
-                4: "dead",
-                5: "epithelial",
-            }
-
-            for inst_id in instance_ids:
-                mask = inst_map == inst_id
-                class_id = self._instance_majority_type(mask.astype(np.uint8), type_map)
-                class_name = class_name_map.get(class_id, f"class_{class_id}")
-
-                polys = polygon_from_mask(mask)
-
-                for poly in polys:
-                    rows.append(
-                        {
-                            "cell_id_in_patch": int(inst_id),
-                            "class_id": int(class_id),
-                            "class_name": class_name,
-                            "geometry": poly,
-                        }
-                    )
-
-            if rows:
-                return gpd.GeoDataFrame(rows, geometry="geometry", crs=None)
-
-            return gpd.GeoDataFrame(
-                {"cell_id_in_patch": [], "class_id": [], "class_name": []},
-                geometry=[],
-                crs=None,
+        if inst_map is None:
+            raise RuntimeError(
+                f"Unsupported CellViT output type: {type(raw)}. "
+                "Need GeoDataFrame, geojson path, or instance map-like output."
             )
 
-        raise RuntimeError(
-            f"Unsupported CellViT output type: {type(raw)}. "
-            "Need GeoDataFrame, geojson path, or instance map-like output."
+        rows = []
+
+        instance_ids = np.unique(inst_map)
+        instance_ids = instance_ids[instance_ids > 0]
+
+        class_name_map = {
+            0: "background",
+            1: "neoplastic",
+            2: "inflammatory",
+            3: "connective",
+            4: "dead",
+            5: "epithelial",
+        }
+
+        for inst_id in instance_ids:
+            mask = inst_map == inst_id
+            class_id = self._instance_majority_type(mask.astype(np.uint8), type_map)
+            class_name = class_name_map.get(class_id, f"class_{class_id}")
+
+            for poly in polygon_from_mask(mask):
+                rows.append(
+                    {
+                        "cell_id_in_patch": int(inst_id),
+                        "class_id": int(class_id),
+                        "class_name": class_name,
+                        "geometry": poly,
+                    }
+                )
+
+        if rows:
+            return gpd.GeoDataFrame(rows, geometry="geometry", crs=None)
+
+        return gpd.GeoDataFrame(
+            {"cell_id_in_patch": [], "class_id": [], "class_name": []},
+            geometry=[],
+            crs=None,
         )
 
     def predict_batch_to_gdfs(self, images: List[np.ndarray]) -> List[gpd.GeoDataFrame]:
@@ -655,12 +563,11 @@ class CellViTInferenceAdapter:
                 if inst is not None and inst.ndim == 3:
                     return [self._raw_to_gdf(m) for m in inst]
 
-        return [self._raw_to_gdf(self._predict_single_raw(img)) for img in images]
+        return [
+            self._raw_to_gdf(self._predict_single_raw(img))
+            for img in images
+        ]
 
-
-# ============================================================
-# H5 save/load for segmentation results
-# ============================================================
 
 def save_cellseg_h5(
     rows: List[Dict[str, Any]],
@@ -756,9 +663,7 @@ def load_cellseg_h5(seg_h5_path: str) -> Tuple[gpd.GeoDataFrame, pd.DataFrame]:
 
         cell_rows = []
 
-        n_cells = len(cells["patch_idx"])
-
-        for i in range(n_cells):
+        for i in range(len(cells["patch_idx"])):
             cell_rows.append(
                 {
                     "patch_idx": int(cells["patch_idx"][i]),
@@ -772,9 +677,7 @@ def load_cellseg_h5(seg_h5_path: str) -> Tuple[gpd.GeoDataFrame, pd.DataFrame]:
 
         patch_rows = []
 
-        n_patches = len(patches["patch_idx"])
-
-        for i in range(n_patches):
+        for i in range(len(patches["patch_idx"])):
             row = {
                 "patch_idx": int(patches["patch_idx"][i]),
                 "barcode": _decode_scalar(patches["barcode"][i]),
@@ -782,8 +685,9 @@ def load_cellseg_h5(seg_h5_path: str) -> Tuple[gpd.GeoDataFrame, pd.DataFrame]:
             }
 
             if "coord_raw_json" in patches:
-                coord_raw = _decode_scalar(patches["coord_raw_json"][i])
-                row["coord_raw"] = json.loads(coord_raw)
+                row["coord_raw"] = json.loads(
+                    _decode_scalar(patches["coord_raw_json"][i])
+                )
 
             patch_rows.append(row)
 
@@ -802,14 +706,8 @@ def load_cellseg_h5(seg_h5_path: str) -> Tuple[gpd.GeoDataFrame, pd.DataFrame]:
             crs=None,
         )
 
-    patch_df = pd.DataFrame(patch_rows)
+    return seg_gdf, pd.DataFrame(patch_rows)
 
-    return seg_gdf, patch_df
-
-
-# ============================================================
-# Segmentation only
-# ============================================================
 
 def _gdf_to_cell_rows(
     gdf: gpd.GeoDataFrame,
@@ -861,15 +759,6 @@ def segment_h5_patches_with_cellvit(
     device: str = "cuda:0",
     predictor: Optional[CellViTInferenceAdapter] = None,
 ) -> str:
-    """
-    Segment H5 patches with CellViT and save only H5 result.
-
-    Output:
-      segment/
-        ├── {sample_id}.h5
-        ├── {sample_id}.summary.json
-        └── _cellvit_runtime/
-    """
     os.makedirs(os.path.dirname(seg_h5_path), exist_ok=True)
     os.makedirs(runtime_dir, exist_ok=True)
 
@@ -957,10 +846,6 @@ def segment_h5_patches_with_cellvit(
     return seg_h5_path
 
 
-# ============================================================
-# Overlay only
-# ============================================================
-
 def save_overlay_png(
     img: np.ndarray,
     gdf: gpd.GeoDataFrame,
@@ -984,36 +869,31 @@ def save_overlay_png(
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.imshow(img)
 
-    if use_class_color:
-        if len(gdf) > 0:
-            for cls_name, sub_gdf in gdf.groupby("class_name"):
-                color = class_color_map.get(str(cls_name).lower(), default_color)
+    if use_class_color and len(gdf) > 0:
+        for cls_name, sub_gdf in gdf.groupby("class_name"):
+            color = class_color_map.get(str(cls_name).lower(), default_color)
+            patches = []
 
-                patches = []
+            for geom in sub_gdf.geometry:
+                for poly in iter_polygons(geom):
+                    xy = np.asarray(poly.exterior.coords)
+                    if len(xy) >= 3:
+                        patches.append(MplPolygon(xy, closed=True))
 
-                for geom in sub_gdf.geometry:
-                    for poly in iter_polygons(geom):
-                        xy = np.asarray(poly.exterior.coords)
-
-                        if len(xy) >= 3:
-                            patches.append(MplPolygon(xy, closed=True))
-
-                if patches:
-                    collection = PatchCollection(
-                        patches,
-                        facecolor="none",
-                        edgecolor=color,
-                        linewidth=1.0,
-                    )
-                    ax.add_collection(collection)
-
+            if patches:
+                collection = PatchCollection(
+                    patches,
+                    facecolor="none",
+                    edgecolor=color,
+                    linewidth=1.0,
+                )
+                ax.add_collection(collection)
     else:
         patches = []
 
         for geom in gdf.geometry:
             for poly in iter_polygons(geom):
                 xy = np.asarray(poly.exterior.coords)
-
                 if len(xy) >= 3:
                     patches.append(MplPolygon(xy, closed=True))
 
@@ -1057,11 +937,6 @@ def save_overlays_from_cellseg_h5(
     use_class_color: bool = True,
     patch_indices: Optional[List[int]] = None,
 ):
-    """
-    Load segmentation result from segment/{sample_id}.h5 and save overlay PNGs.
-
-    This function does not run CellViT again.
-    """
     os.makedirs(overlay_dir, exist_ok=True)
 
     seg_gdf, patch_df = load_cellseg_h5(seg_h5_path)
@@ -1112,10 +987,6 @@ def save_overlays_from_cellseg_h5(
     print(f"[INFO] overlays saved to {overlay_dir}")
 
 
-# ============================================================
-# Multi-oncotree wrappers
-# ============================================================
-
 def list_sample_ids_from_patches(oncotree_root: str) -> List[str]:
     patches_dir = os.path.join(oncotree_root, "patches")
 
@@ -1123,13 +994,11 @@ def list_sample_ids_from_patches(oncotree_root: str) -> List[str]:
         print(f"[WARN] patches dir not found: {patches_dir}")
         return []
 
-    sample_ids = []
-
-    for filename in sorted(os.listdir(patches_dir)):
-        if filename.endswith(".h5"):
-            sample_ids.append(os.path.splitext(filename)[0])
-
-    return sample_ids
+    return [
+        os.path.splitext(filename)[0]
+        for filename in sorted(os.listdir(patches_dir))
+        if filename.endswith(".h5")
+    ]
 
 
 def build_sample_paths(
@@ -1248,6 +1117,7 @@ def segment_all_oncotrees(
     hest_root: str,
     oncotrees: List[str],
     model_path: str,
+    sample_ids: Optional[Tuple[str, ...]] = None,
     batch_size: int = 8,
     num_workers: int = 0,
     device: str = "cuda:0",
@@ -1257,11 +1127,20 @@ def segment_all_oncotrees(
 
     for oncotree in oncotrees:
         oncotree_root = os.path.join(hest_root, oncotree)
-        sample_ids = list_sample_ids_from_patches(oncotree_root)
 
-        print(f"[INFO] {oncotree}: {len(sample_ids)} samples")
+        all_sample_ids = list_sample_ids_from_patches(oncotree_root)
+        target_sample_ids = filter_sample_ids(
+            all_sample_ids=all_sample_ids,
+            selected_sample_ids=sample_ids,
+        )
 
-        for sample_id in sample_ids:
+        print(
+            f"[INFO] {oncotree}: "
+            f"{len(target_sample_ids)} / {len(all_sample_ids)} samples selected"
+        )
+        print(f"[INFO] selected sample_ids: {target_sample_ids}")
+
+        for sample_id in target_sample_ids:
             seg_h5_path = segment_one_sample(
                 hest_root=hest_root,
                 oncotree=oncotree,
@@ -1282,6 +1161,7 @@ def segment_all_oncotrees(
 def save_overlays_all_oncotrees(
     hest_root: str,
     oncotrees: List[str],
+    sample_ids: Optional[Tuple[str, ...]] = None,
     use_class_color: bool = True,
     overwrite: bool = False,
 ) -> List[str]:
@@ -1289,11 +1169,20 @@ def save_overlays_all_oncotrees(
 
     for oncotree in oncotrees:
         oncotree_root = os.path.join(hest_root, oncotree)
-        sample_ids = list_sample_ids_from_patches(oncotree_root)
 
-        print(f"[INFO] {oncotree}: {len(sample_ids)} samples")
+        all_sample_ids = list_sample_ids_from_patches(oncotree_root)
+        target_sample_ids = filter_sample_ids(
+            all_sample_ids=all_sample_ids,
+            selected_sample_ids=sample_ids,
+        )
 
-        for sample_id in sample_ids:
+        print(
+            f"[INFO] {oncotree}: "
+            f"{len(target_sample_ids)} / {len(all_sample_ids)} samples selected"
+        )
+        print(f"[INFO] selected sample_ids: {target_sample_ids}")
+
+        for sample_id in target_sample_ids:
             overlay_dir = save_overlay_one_sample(
                 hest_root=hest_root,
                 oncotree=oncotree,
@@ -1311,11 +1200,13 @@ def save_overlays_all_oncotrees(
 def segment_all_oncotrees_from_config(
     download_cfg: DownloadConfig,
     cellseg_cfg: CellSegmentConfig,
+    sample_ids: Optional[Tuple[str, ...]] = None,
 ) -> List[str]:
     return segment_all_oncotrees(
         hest_root=str(download_cfg.download_dir),
-        oncotrees=download_cfg.oncotrees,
+        oncotrees=list(download_cfg.oncotrees),
         model_path=str(cellseg_cfg.model_path),
+        sample_ids=sample_ids,
         batch_size=cellseg_cfg.batch_size,
         num_workers=cellseg_cfg.num_workers,
         device=cellseg_cfg.device,
@@ -1326,18 +1217,16 @@ def segment_all_oncotrees_from_config(
 def save_overlays_all_oncotrees_from_config(
     download_cfg: DownloadConfig,
     cellseg_cfg: CellSegmentConfig,
+    sample_ids: Optional[Tuple[str, ...]] = None,
 ) -> List[str]:
     return save_overlays_all_oncotrees(
         hest_root=str(download_cfg.download_dir),
-        oncotrees=download_cfg.oncotrees,
+        oncotrees=list(download_cfg.oncotrees),
+        sample_ids=sample_ids,
         use_class_color=cellseg_cfg.use_class_color,
         overwrite=cellseg_cfg.overwrite_overlay,
     )
 
-
-# ============================================================
-# Main
-# ============================================================
 
 if __name__ == "__main__":
     cfg = CONFIG
@@ -1348,21 +1237,23 @@ if __name__ == "__main__":
     )
 
     segment_paths: List[str] = []
-    # overlay_dirs: List[str] = []
+    overlay_dirs: List[str] = []
 
     if cfg.run.run_segment:
         segment_paths = segment_all_oncotrees_from_config(
             download_cfg=cfg.download,
             cellseg_cfg=cfg.cellseg,
+            sample_ids=cfg.sample_ids,
         )
 
-    # if cfg.run.run_overlay:
-    #     overlay_dirs = save_overlays_all_oncotrees_from_config(
-    #         download_cfg=cfg.download,
-    #         cellseg_cfg=cfg.cellseg,
-    #     )
+    if cfg.run.run_overlay:
+        overlay_dirs = save_overlays_all_oncotrees_from_config(
+            download_cfg=cfg.download,
+            cellseg_cfg=cfg.cellseg,
+            sample_ids=cfg.sample_ids,
+        )
 
     print("[INFO] all done")
     print(f"[INFO] segmented samples: {len(segment_paths)}")
-    # print(f"[INFO] overlay dirs: {len(overlay_dirs)}")
-
+    print(f"[INFO] overlay dirs: {len(overlay_dirs)}")
+    
