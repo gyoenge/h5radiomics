@@ -1,7 +1,5 @@
 # Radiomics Output Format 
 
-# Radiomics Output Format
-
 Radiomics outputs store handcrafted image features extracted from spatial transcriptomics patches.
 
 The HEST-Radiomics pipeline extracts radiomics features from patch images and, when segmentation outputs are available, can also support cell-aware feature extraction using segmentation-derived masks.
