@@ -77,8 +77,11 @@ def load_all_h5ad_from_dir(
 
     for h5ad_path in h5ad_files:
         print(f"Loading h5ad: {h5ad_path}")
+
         adata = sc.read_h5ad(h5ad_path)
         adata.obs_names_make_unique()
+        adata.uns["sample_id"] = h5ad_path.stem
+
         adata_list.append(adata)
 
     return adata_list
@@ -165,7 +168,10 @@ def select_top_k_genes(
         df = adata.to_df()[common_genes].copy()
 
         sample_id = adata.uns.get("sample_id", "sample")
-        df.index = [f"{sample_id}_{idx}" for idx in df.index]
+        df.index = [
+            f"{sample_id}_{idx}"
+            for idx in df.index
+        ]
 
         expression_dfs.append(df)
 
@@ -173,6 +179,11 @@ def select_top_k_genes(
         expression_dfs,
         axis=0,
     )
+
+    expression_df.index = [
+        f"cell_{i}"
+        for i in range(len(expression_df))
+    ]
 
     if criteria == "mean":
 
