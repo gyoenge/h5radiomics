@@ -16,7 +16,7 @@ This documentation describes the basic usage of the HEST radiomics pipeline.
 
 ---
 
-## Documentation Contents
+## Contents
 
 ```{toctree}
 :maxdepth: 1
