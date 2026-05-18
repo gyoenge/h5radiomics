@@ -1,4 +1,4 @@
-# Segment File Format
+# Segment Output Format
 
 The segmentation file stores cell-level segmentation metadata for each spatial transcriptomics patch.  
 Instead of storing dense bitmap masks, the pipeline stores polygon-based vector representations of segmented cells, enabling compact storage and flexible downstream analysis.
@@ -54,13 +54,13 @@ This structure enables efficient mapping between spatial transcriptomics patches
 
 ---
 
-# File Structure
+## File Structure
 
-## `patches/`
+#### `patches/`
 
 Patch-level metadata.
 
-### `patches/barcode`
+###### `patches/barcode`
 
 Visium spot barcode corresponding to each patch.
 
@@ -75,7 +75,7 @@ Example:
 AAACAAGTATCTCCCA-1
 ```
 
-### `patches/coord_raw_json`
+###### `patches/coord_raw_json`
 
 Original WSI coordinates of each patch center.
 
@@ -93,7 +93,7 @@ Example:
 Coordinates are stored as JSON strings.
 
 
-### `patches/n_cells`
+###### `patches/n_cells`
 
 Number of segmented cells contained in each patch.
 
@@ -108,7 +108,7 @@ Example:
 [45, 32, 76, ...]
 ```
 
-### `patches/patch_idx`
+###### `patches/patch_idx`
 
 Unique integer patch index.
 
@@ -125,13 +125,13 @@ Example:
 
 ---
 
-## `cells/`
+#### `cells/`
 
 Cell-level segmentation metadata.
 
 Each row corresponds to a single segmented cell.
 
-### `cells/barcode`
+###### `cells/barcode`
 
 Visium barcode of the parent patch containing the cell.
 
@@ -140,7 +140,7 @@ shape: (N_cells,)
 dtype: object
 ```
 
-### `cells/cell_id_in_patch`
+###### `cells/cell_id_in_patch`
 
 Cell index within the patch.
 
@@ -155,7 +155,7 @@ Example:
 [1, 2, 3, 4, ...]
 ```
 
-### `cells/class_id`
+###### `cells/class_id`
 
 Cell type identifier predicted by the segmentation/classification model.
 
@@ -182,7 +182,7 @@ Typical classes may include:
 
 `-1` may indicate unknown or unclassified cells.
 
-### `cells/class_name`
+###### `cells/class_name`
 
 Human-readable cell type label.
 
@@ -199,7 +199,7 @@ inflammatory
 neoplastic
 ```
 
-### `cells/geometry_wkt`
+###### `cells/geometry_wkt`
 
 Polygon representation of the segmented cell mask stored in WKT (Well-Known Text) format.
 
@@ -216,7 +216,7 @@ POLYGON ((64 0, 63 1, 63 2, ...))
 
 These polygons define the cell boundaries in patch-local coordinates.
 
-### `cells/patch_idx`
+###### `cells/patch_idx`
 
 Patch index corresponding to the parent patch.
 
@@ -237,7 +237,7 @@ Example:
 
 ---
 
-# Why Polygon-Based Storage?
+## Why Polygon-Based Storage?
 
 Instead of storing dense binary masks, the pipeline stores vector polygons for several reasons:
 
@@ -252,7 +252,7 @@ This design is particularly suitable for computational pathology and spatial tra
 
 ---
 
-# Typical Downstream Workflow
+## Typical Downstream Workflow
 
 The segmentation polygons are typically converted into rasterized masks during processing.
 
@@ -275,7 +275,7 @@ cv2.fillPoly(mask, [polygon_pts], 1)
 
 ---
 
-# PyRadiomics Label Convention
+## PyRadiomics Label Convention
 
 PyRadiomics expects the ROI label to match the specified `label` argument.
 
@@ -300,7 +300,7 @@ ValueError: Label (1) not present in mask. Choose from [255]
 
 ---
 
-# Potential Applications
+## Potential Applications
 
 This segmentation structure supports a wide range of downstream analyses:
 
@@ -316,7 +316,7 @@ This segmentation structure supports a wide range of downstream analyses:
 
 ---
 
-# Example
+## Example
 
 ```python
 import h5py

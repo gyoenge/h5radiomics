@@ -6,7 +6,7 @@
   <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Segment File Format &mdash; HEST-Radiomics 1.0.0 documentation</title>
+  <title>Segment Output Format &mdash; HEST-Radiomics 1.0.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
       <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
 
@@ -18,7 +18,9 @@
       <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
-    <link rel="search" title="Search" href="../search.html" /> 
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Radiomics Output Format" href="radiomics.html" />
+    <link rel="prev" title="Output Overview" href="overview.html" /> 
 </head>
 
 <body class="wy-body-for-nav"> 
@@ -43,14 +45,40 @@
               <p class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../dataset.html">Dataset</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../stepbystep.html">Run Step-by-step</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../configuration.html">Configuration</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Output Description</span></p>
-<ul>
+<ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="overview.html">Output Overview</a></li>
-<li class="toctree-l1"><a class="reference internal" href="overview.html#directory-descriptions">Directory Descriptions</a></li>
-<li class="toctree-l1"><a class="reference internal" href="overview.html#typical-workflow">Typical Workflow</a></li>
-<li class="toctree-l1"><a class="reference internal" href="overview.html#notes">Notes</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Segment Output Format</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#file-structure">File Structure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#patches"><code class="docutils literal notranslate"><span class="pre">patches/</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#patches-barcode"><code class="docutils literal notranslate"><span class="pre">patches/barcode</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#patches-coord-raw-json"><code class="docutils literal notranslate"><span class="pre">patches/coord_raw_json</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#patches-n-cells"><code class="docutils literal notranslate"><span class="pre">patches/n_cells</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#patches-patch-idx"><code class="docutils literal notranslate"><span class="pre">patches/patch_idx</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#cells"><code class="docutils literal notranslate"><span class="pre">cells/</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#cells-barcode"><code class="docutils literal notranslate"><span class="pre">cells/barcode</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#cells-cell-id-in-patch"><code class="docutils literal notranslate"><span class="pre">cells/cell_id_in_patch</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#cells-class-id"><code class="docutils literal notranslate"><span class="pre">cells/class_id</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#cells-class-name"><code class="docutils literal notranslate"><span class="pre">cells/class_name</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#cells-geometry-wkt"><code class="docutils literal notranslate"><span class="pre">cells/geometry_wkt</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#cells-patch-idx"><code class="docutils literal notranslate"><span class="pre">cells/patch_idx</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#why-polygon-based-storage">Why Polygon-Based Storage?</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#typical-downstream-workflow">Typical Downstream Workflow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#pyradiomics-label-convention">PyRadiomics Label Convention</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#potential-applications">Potential Applications</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#example">Example</a></li>
+</ul>
+</li>
 <li class="toctree-l1"><a class="reference internal" href="radiomics.html">Radiomics Output Format</a></li>
 </ul>
 
@@ -68,7 +96,7 @@
           <div role="navigation" aria-label="Page navigation">
   <ul class="wy-breadcrumbs">
       <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
-      <li class="breadcrumb-item active">Segment File Format</li>
+      <li class="breadcrumb-item active">Segment Output Format</li>
       <li class="wy-breadcrumbs-aside">
             <a href="../_sources/outputs/segment.md.txt" rel="nofollow"> View page source</a>
       </li>
@@ -78,8 +106,8 @@
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
            <div itemprop="articleBody">
              
-  <section id="segment-file-format">
-<h1>Segment File Format<a class="headerlink" href="#segment-file-format" title="Link to this heading"></a></h1>
+  <section id="segment-output-format">
+<h1>Segment Output Format<a class="headerlink" href="#segment-output-format" title="Link to this heading"></a></h1>
 <p>The segmentation file stores cell-level segmentation metadata for each spatial transcriptomics patch.<br />
 Instead of storing dense bitmap masks, the pipeline stores polygon-based vector representations of segmented cells, enabling compact storage and flexible downstream analysis.</p>
 <p>The segmentation files are stored in HDF5 (<code class="docutils literal notranslate"><span class="pre">.h5</span></code>) format.</p>
@@ -124,15 +152,14 @@ Instead of storing dense bitmap masks, the pipeline stores polygon-based vector 
 <li><p><code class="docutils literal notranslate"><span class="pre">cells/</span></code> stores cell-level segmentation information</p></li>
 </ul>
 <p>This structure enables efficient mapping between spatial transcriptomics patches and segmented cells.</p>
-</section>
 <hr class="docutils" />
 <section id="file-structure">
-<h1>File Structure<a class="headerlink" href="#file-structure" title="Link to this heading"></a></h1>
+<h2>File Structure<a class="headerlink" href="#file-structure" title="Link to this heading"></a></h2>
 <section id="patches">
-<h2><code class="docutils literal notranslate"><span class="pre">patches/</span></code><a class="headerlink" href="#patches" title="Link to this heading"></a></h2>
+<h3><code class="docutils literal notranslate"><span class="pre">patches/</span></code><a class="headerlink" href="#patches" title="Link to this heading"></a></h3>
 <p>Patch-level metadata.</p>
 <section id="patches-barcode">
-<h3><code class="docutils literal notranslate"><span class="pre">patches/barcode</span></code><a class="headerlink" href="#patches-barcode" title="Link to this heading"></a></h3>
+<h4><code class="docutils literal notranslate"><span class="pre">patches/barcode</span></code><a class="headerlink" href="#patches-barcode" title="Link to this heading"></a></h4>
 <p>Visium spot barcode corresponding to each patch.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">shape</span><span class="p">:</span> <span class="p">(</span><span class="n">N_patches</span><span class="p">,)</span>
 <span class="n">dtype</span><span class="p">:</span> <span class="nb">object</span>
@@ -144,7 +171,7 @@ Instead of storing dense bitmap masks, the pipeline stores polygon-based vector 
 </div>
 </section>
 <section id="patches-coord-raw-json">
-<h3><code class="docutils literal notranslate"><span class="pre">patches/coord_raw_json</span></code><a class="headerlink" href="#patches-coord-raw-json" title="Link to this heading"></a></h3>
+<h4><code class="docutils literal notranslate"><span class="pre">patches/coord_raw_json</span></code><a class="headerlink" href="#patches-coord-raw-json" title="Link to this heading"></a></h4>
 <p>Original WSI coordinates of each patch center.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">shape</span><span class="p">:</span> <span class="p">(</span><span class="n">N_patches</span><span class="p">,)</span>
 <span class="n">dtype</span><span class="p">:</span> <span class="nb">object</span>
@@ -157,7 +184,7 @@ Instead of storing dense bitmap masks, the pipeline stores polygon-based vector 
 <p>Coordinates are stored as JSON strings.</p>
 </section>
 <section id="patches-n-cells">
-<h3><code class="docutils literal notranslate"><span class="pre">patches/n_cells</span></code><a class="headerlink" href="#patches-n-cells" title="Link to this heading"></a></h3>
+<h4><code class="docutils literal notranslate"><span class="pre">patches/n_cells</span></code><a class="headerlink" href="#patches-n-cells" title="Link to this heading"></a></h4>
 <p>Number of segmented cells contained in each patch.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">shape</span><span class="p">:</span> <span class="p">(</span><span class="n">N_patches</span><span class="p">,)</span>
 <span class="n">dtype</span><span class="p">:</span> <span class="n">int64</span>
@@ -169,7 +196,7 @@ Instead of storing dense bitmap masks, the pipeline stores polygon-based vector 
 </div>
 </section>
 <section id="patches-patch-idx">
-<h3><code class="docutils literal notranslate"><span class="pre">patches/patch_idx</span></code><a class="headerlink" href="#patches-patch-idx" title="Link to this heading"></a></h3>
+<h4><code class="docutils literal notranslate"><span class="pre">patches/patch_idx</span></code><a class="headerlink" href="#patches-patch-idx" title="Link to this heading"></a></h4>
 <p>Unique integer patch index.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">shape</span><span class="p">:</span> <span class="p">(</span><span class="n">N_patches</span><span class="p">,)</span>
 <span class="n">dtype</span><span class="p">:</span> <span class="n">int64</span>
@@ -179,15 +206,15 @@ Instead of storing dense bitmap masks, the pipeline stores polygon-based vector 
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span>
 </pre></div>
 </div>
-</section>
-</section>
 <hr class="docutils" />
+</section>
+</section>
 <section id="cells">
-<h2><code class="docutils literal notranslate"><span class="pre">cells/</span></code><a class="headerlink" href="#cells" title="Link to this heading"></a></h2>
+<h3><code class="docutils literal notranslate"><span class="pre">cells/</span></code><a class="headerlink" href="#cells" title="Link to this heading"></a></h3>
 <p>Cell-level segmentation metadata.</p>
 <p>Each row corresponds to a single segmented cell.</p>
 <section id="cells-barcode">
-<h3><code class="docutils literal notranslate"><span class="pre">cells/barcode</span></code><a class="headerlink" href="#cells-barcode" title="Link to this heading"></a></h3>
+<h4><code class="docutils literal notranslate"><span class="pre">cells/barcode</span></code><a class="headerlink" href="#cells-barcode" title="Link to this heading"></a></h4>
 <p>Visium barcode of the parent patch containing the cell.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">shape</span><span class="p">:</span> <span class="p">(</span><span class="n">N_cells</span><span class="p">,)</span>
 <span class="n">dtype</span><span class="p">:</span> <span class="nb">object</span>
@@ -195,7 +222,7 @@ Instead of storing dense bitmap masks, the pipeline stores polygon-based vector 
 </div>
 </section>
 <section id="cells-cell-id-in-patch">
-<h3><code class="docutils literal notranslate"><span class="pre">cells/cell_id_in_patch</span></code><a class="headerlink" href="#cells-cell-id-in-patch" title="Link to this heading"></a></h3>
+<h4><code class="docutils literal notranslate"><span class="pre">cells/cell_id_in_patch</span></code><a class="headerlink" href="#cells-cell-id-in-patch" title="Link to this heading"></a></h4>
 <p>Cell index within the patch.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">shape</span><span class="p">:</span> <span class="p">(</span><span class="n">N_cells</span><span class="p">,)</span>
 <span class="n">dtype</span><span class="p">:</span> <span class="n">int64</span>
@@ -207,7 +234,7 @@ Instead of storing dense bitmap masks, the pipeline stores polygon-based vector 
 </div>
 </section>
 <section id="cells-class-id">
-<h3><code class="docutils literal notranslate"><span class="pre">cells/class_id</span></code><a class="headerlink" href="#cells-class-id" title="Link to this heading"></a></h3>
+<h4><code class="docutils literal notranslate"><span class="pre">cells/class_id</span></code><a class="headerlink" href="#cells-class-id" title="Link to this heading"></a></h4>
 <p>Cell type identifier predicted by the segmentation/classification model.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">shape</span><span class="p">:</span> <span class="p">(</span><span class="n">N_cells</span><span class="p">,)</span>
 <span class="n">dtype</span><span class="p">:</span> <span class="n">int64</span>
@@ -245,7 +272,7 @@ Instead of storing dense bitmap masks, the pipeline stores polygon-based vector 
 <p><code class="docutils literal notranslate"><span class="pre">-1</span></code> may indicate unknown or unclassified cells.</p>
 </section>
 <section id="cells-class-name">
-<h3><code class="docutils literal notranslate"><span class="pre">cells/class_name</span></code><a class="headerlink" href="#cells-class-name" title="Link to this heading"></a></h3>
+<h4><code class="docutils literal notranslate"><span class="pre">cells/class_name</span></code><a class="headerlink" href="#cells-class-name" title="Link to this heading"></a></h4>
 <p>Human-readable cell type label.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">shape</span><span class="p">:</span> <span class="p">(</span><span class="n">N_cells</span><span class="p">,)</span>
 <span class="n">dtype</span><span class="p">:</span> <span class="nb">object</span>
@@ -259,7 +286,7 @@ neoplastic
 </div>
 </section>
 <section id="cells-geometry-wkt">
-<h3><code class="docutils literal notranslate"><span class="pre">cells/geometry_wkt</span></code><a class="headerlink" href="#cells-geometry-wkt" title="Link to this heading"></a></h3>
+<h4><code class="docutils literal notranslate"><span class="pre">cells/geometry_wkt</span></code><a class="headerlink" href="#cells-geometry-wkt" title="Link to this heading"></a></h4>
 <p>Polygon representation of the segmented cell mask stored in WKT (Well-Known Text) format.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">shape</span><span class="p">:</span> <span class="p">(</span><span class="n">N_cells</span><span class="p">,)</span>
 <span class="n">dtype</span><span class="p">:</span> <span class="nb">object</span>
@@ -272,7 +299,7 @@ neoplastic
 <p>These polygons define the cell boundaries in patch-local coordinates.</p>
 </section>
 <section id="cells-patch-idx">
-<h3><code class="docutils literal notranslate"><span class="pre">cells/patch_idx</span></code><a class="headerlink" href="#cells-patch-idx" title="Link to this heading"></a></h3>
+<h4><code class="docutils literal notranslate"><span class="pre">cells/patch_idx</span></code><a class="headerlink" href="#cells-patch-idx" title="Link to this heading"></a></h4>
 <p>Patch index corresponding to the parent patch.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">shape</span><span class="p">:</span> <span class="p">(</span><span class="n">N_cells</span><span class="p">,)</span>
 <span class="n">dtype</span><span class="p">:</span> <span class="n">int64</span>
@@ -303,7 +330,7 @@ neoplastic
 </section>
 <hr class="docutils" />
 <section id="why-polygon-based-storage">
-<h1>Why Polygon-Based Storage?<a class="headerlink" href="#why-polygon-based-storage" title="Link to this heading"></a></h1>
+<h2>Why Polygon-Based Storage?<a class="headerlink" href="#why-polygon-based-storage" title="Link to this heading"></a></h2>
 <p>Instead of storing dense binary masks, the pipeline stores vector polygons for several reasons:</p>
 <ul class="simple">
 <li><p>significantly smaller storage size</p></li>
@@ -317,7 +344,7 @@ neoplastic
 </section>
 <hr class="docutils" />
 <section id="typical-downstream-workflow">
-<h1>Typical Downstream Workflow<a class="headerlink" href="#typical-downstream-workflow" title="Link to this heading"></a></h1>
+<h2>Typical Downstream Workflow<a class="headerlink" href="#typical-downstream-workflow" title="Link to this heading"></a></h2>
 <p>The segmentation polygons are typically converted into rasterized masks during processing.</p>
 <div class="highlight-text notranslate"><div class="highlight"><pre><span></span>WKT polygon
     ↓
@@ -336,7 +363,7 @@ Radiomics / morphology extraction
 </section>
 <hr class="docutils" />
 <section id="pyradiomics-label-convention">
-<h1>PyRadiomics Label Convention<a class="headerlink" href="#pyradiomics-label-convention" title="Link to this heading"></a></h1>
+<h2>PyRadiomics Label Convention<a class="headerlink" href="#pyradiomics-label-convention" title="Link to this heading"></a></h2>
 <p>PyRadiomics expects the ROI label to match the specified <code class="docutils literal notranslate"><span class="pre">label</span></code> argument.</p>
 <p>Recommended binary mask convention:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">background</span> <span class="o">=</span> <span class="mi">0</span>
@@ -354,7 +381,7 @@ Radiomics / morphology extraction
 </section>
 <hr class="docutils" />
 <section id="potential-applications">
-<h1>Potential Applications<a class="headerlink" href="#potential-applications" title="Link to this heading"></a></h1>
+<h2>Potential Applications<a class="headerlink" href="#potential-applications" title="Link to this heading"></a></h2>
 <p>This segmentation structure supports a wide range of downstream analyses:</p>
 <ul class="simple">
 <li><p>cell morphology analysis</p></li>
@@ -370,7 +397,7 @@ Radiomics / morphology extraction
 </section>
 <hr class="docutils" />
 <section id="example">
-<h1>Example<a class="headerlink" href="#example" title="Link to this heading"></a></h1>
+<h2>Example<a class="headerlink" href="#example" title="Link to this heading"></a></h2>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">h5py</span>
 
 <span class="k">with</span> <span class="n">h5py</span><span class="o">.</span><span class="n">File</span><span class="p">(</span><span class="s2">&quot;NCBI681.h5&quot;</span><span class="p">,</span> <span class="s2">&quot;r&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">h5</span><span class="p">:</span>
@@ -381,11 +408,15 @@ Radiomics / morphology extraction
 </pre></div>
 </div>
 </section>
+</section>
 
 
            </div>
           </div>
-          <footer>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="overview.html" class="btn btn-neutral float-left" title="Output Overview" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="radiomics.html" class="btn btn-neutral float-right" title="Radiomics Output Format" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
 
   <hr/>
 
