@@ -93,6 +93,7 @@ def get_common_genes(
 
     for adata in adata_list:
         adata = adata.copy()
+        adata.obs_names_make_unique()
 
         if min_cells_pct:
 
