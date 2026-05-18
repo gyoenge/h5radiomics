@@ -66,7 +66,7 @@ hestradiomics/
 └── io/
 ``` -->
 
----
+<!-- ---
 
 ## Main Features
 
@@ -90,4 +90,4 @@ Compatible with H5AD-based transcriptomics workflows and Visium-style datasets.
 
 Compact polygon-based HDF5 segmentation representation for large-scale WSI processing.
 
-
+ -->
