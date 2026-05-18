@@ -159,11 +159,18 @@ def select_top_k_genes(
             "No common genes found."
         )
 
+    expression_dfs = []
+
+    for adata in adata_list:
+        df = adata.to_df()[common_genes].copy()
+
+        sample_id = adata.uns.get("sample_id", "sample")
+        df.index = [f"{sample_id}_{idx}" for idx in df.index]
+
+        expression_dfs.append(df)
+
     expression_df = pd.concat(
-        [
-            adata.to_df()[common_genes]
-            for adata in adata_list
-        ],
+        expression_dfs,
         axis=0,
     )
 
