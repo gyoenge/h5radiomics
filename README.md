@@ -44,6 +44,8 @@ pip install "numpy<2.0.0,>=1.24"  # avoid NumPy 2.x compatibility issues
 ### 3. Install hestradiomics
 Then: 
 ```bash
+git clone https://github.com/gyoenge/hest-radiomics.git
+cd hest-radiomics/
 # inside the hest-radiomics/ directory 
 pip install -e . --no-build-isolation
 ```
