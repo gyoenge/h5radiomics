@@ -4,7 +4,7 @@ from hestradiomics.config import CONFIG
 from hestradiomics.hest import (
     huggingface_checkin, 
     download_hest,
-    run_gene_extraction,
+    geneset_extraction,
 )
 from hestradiomics.segment.pipeline import (
     segment_all_oncotrees_from_config,
@@ -46,13 +46,17 @@ def main():
     # -------------------------------------------------------------------------
     # 2. Extract Gene Sets
     # -------------------------------------------------------------------------
-    run_gene_extraction(
-        download_cfg=hest_config,
+
+    geneset_extraction(
+        download_dir=download_dir, 
+        oncotrees=hest_config.oncotrees, 
         sample_ids=sample_ids,
         k_values=(50, 100, 250),
         criteria_values=("var", "mean"),
         min_cells_pct=0.1,
     )
+
+    print("[INFO] Gene sets extraction completed")
     print("\n-------------------------------------------------------------------------\n")
 
     # -------------------------------------------------------------------------

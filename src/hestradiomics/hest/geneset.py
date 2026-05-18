@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 
-from hestradiomics.config import HestConfig
 from hestradiomics.utils import ensure_dir
 
 
@@ -226,8 +225,9 @@ def select_top_k_genes(
     return genes
 
 
-def run_gene_extraction(
-    download_cfg: HestConfig,
+def geneset_extraction(
+    download_dir: Path, 
+    oncotrees: tuple[str],
     sample_ids: Optional[tuple[str, ...]] = None,
     k_values: Sequence[int] = (
         50,
@@ -241,10 +241,10 @@ def run_gene_extraction(
 ) -> None:
     summary = []
 
-    for oncotree_code in download_cfg.oncotrees:
+    for oncotree_code in oncotrees:
 
         oncotree_dir = (
-            download_cfg.download_dir
+            download_dir
             / oncotree_code
         )
 
@@ -314,7 +314,7 @@ def run_gene_extraction(
                 )
 
     save_json(
-        download_cfg.download_dir
+        save_dir
         / "gene_extraction_summary.json",
         summary,
     )
