@@ -28,9 +28,9 @@ Each directory serves a different role in the spatial transcriptomics and radiom
 
 ---
 
-# Directory Descriptions
+## Directory Descriptions
 
-## .cache/
+#### .cache/
 
 Temporary cache files used during preprocessing and feature extraction.
 
@@ -45,7 +45,7 @@ This directory can usually be regenerated safely.
 
 ---
 
-## genes/
+#### genes/
 
 Gene-related outputs and processed transcriptomics information.
 
@@ -66,7 +66,7 @@ genes/
 
 ---
 
-## metadata/
+#### metadata/
 
 Dataset-level metadata files.
 
@@ -79,7 +79,7 @@ Typical contents may include:
 
 ---
 
-## patches/
+#### patches/
 
 HDF5 patch datasets extracted from Whole Slide Images (WSIs).
 
@@ -102,7 +102,7 @@ These files are commonly used as the primary image source for downstream analysi
 
 ---
 
-## patches_vis/
+#### patches_vis/
 
 Visualization outputs for extracted patches.
 
@@ -116,7 +116,7 @@ These files are intended for human inspection and debugging.
 
 ---
 
-## radiomics/
+#### radiomics/
 
 Extracted radiomics feature files.
 
@@ -143,7 +143,7 @@ radiomics/
 
 ---
 
-## radiomics_stats/
+#### radiomics_stats/
 
 Statistical summaries and diagnostic outputs for radiomics features.
 
@@ -159,7 +159,7 @@ This directory is useful for feature quality assessment and debugging.
 
 ---
 
-## segment/
+#### segment/
 
 Cell segmentation outputs stored in HDF5 format.
 
@@ -185,7 +185,7 @@ See also:
 
 ---
 
-## segment_vis/
+#### segment_vis/
 
 Visualization outputs for segmentation results.
 
@@ -200,7 +200,7 @@ These outputs are useful for validating segmentation quality.
 
 ---
 
-## spatial_plots/
+#### spatial_plots/
 
 Spatial transcriptomics visualization outputs.
 
@@ -215,7 +215,7 @@ These visualizations help interpret spatial biological patterns.
 
 ---
 
-## st/
+#### st/
 
 Spatial transcriptomics datasets.
 
@@ -239,7 +239,7 @@ These files commonly contain:
 
 ---
 
-## thumbnails/
+#### thumbnails/
 
 Low-resolution thumbnail images of WSIs.
 
@@ -254,7 +254,7 @@ These images provide a lightweight representation of the original slide.
 
 ---
 
-# Typical Workflow
+## Typical Workflow
 
 The general pipeline workflow is:
 
@@ -276,7 +276,7 @@ Generated outputs are progressively stored in the directories described above.
 
 ---
 
-# Notes
+## Notes
 
 * Most outputs are generated automatically by the pipeline.
 * Intermediate directories may vary depending on the extraction configuration.

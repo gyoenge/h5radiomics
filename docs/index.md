@@ -23,8 +23,9 @@ This documentation describes the basic usage of the HEST radiomics pipeline.
 :caption: Getting Started
 
 installation
-dataset
-radiomics 
+quickstart
+stepbystep
+configuration 
 ```
 
 ```{toctree}
