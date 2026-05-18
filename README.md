@@ -1,5 +1,8 @@
 # HEST-Radiomics (hestradiomics)
 
+[![docs](https://img.shields.io/badge/docs-readthedocs-brightgreen)](https://hest-radiomics.readthedocs.io/en/latest/) 
+
+
 Radiomics feature extraction pipeline for HEST dataset with WSI (Whole Slide Image) patches.
 
 ---
