@@ -74,12 +74,13 @@ def main():
         overwrite=segment_config.overwrite_segment,
     )
 
+    print("[INFO] Segment completed")
     print("\n-------------------------------------------------------------------------\n")
 
     # -------------------------------------------------------------------------
     # 4. Visualize Patches / Segment Overlays
     # -------------------------------------------------------------------------
-    
+
     run_visualization_from_config(CONFIG)
 
     save_overlays_all_oncotrees_from_config(
