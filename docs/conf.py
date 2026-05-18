@@ -1,3 +1,8 @@
+project = "HEST-Radiomics"
+copyright = "2026, Huigyoeng Son"
+author = "Huigyoeng Son"
+release = "1.0.0"
+
 extensions = [
     "myst_parser",
 ]

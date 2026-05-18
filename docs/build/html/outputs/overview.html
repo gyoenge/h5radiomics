@@ -1,0 +1,380 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Output Overview &mdash; HEST-Radiomics 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Radiomics Output Format" href="radiomics.html" />
+    <link rel="prev" title="Dataset" href="../dataset.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            HEST-Radiomics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dataset.html">Dataset</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Output Description</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Output Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="#directory-descriptions">Directory Descriptions</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#cache">.cache/</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#genes">genes/</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#metadata">metadata/</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#patches">patches/</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#patches-vis">patches_vis/</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#radiomics">radiomics/</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#radiomics-stats">radiomics_stats/</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#segment">segment/</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#segment-vis">segment_vis/</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#spatial-plots">spatial_plots/</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#st">st/</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#thumbnails">thumbnails/</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="#typical-workflow">Typical Workflow</a></li>
+<li class="toctree-l1"><a class="reference internal" href="#notes">Notes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="radiomics.html">Radiomics Output Format</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">HEST-Radiomics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Output Overview</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/outputs/overview.md.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="output-overview">
+<h1>Output Overview<a class="headerlink" href="#output-overview" title="Link to this heading"></a></h1>
+<p>This page describes the output directory structure generated by the HEST-Radiomics pipeline.</p>
+<p>The pipeline organizes all intermediate and final outputs under the dataset-specific directory.</p>
+<p>Example:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>data/
+└── hest/
+    └── IDC/
+        ├── .cache/
+        ├── genes/
+        ├── metadata/
+        ├── patches/
+        ├── patches_vis/
+        ├── radiomics/
+        ├── radiomics_stats/
+        ├── segment/
+        ├── segment_vis/
+        ├── spatial_plots/
+        ├── st/
+        └── thumbnails/
+</pre></div>
+</div>
+<p>Each directory serves a different role in the spatial transcriptomics and radiomics workflow.</p>
+</section>
+<hr class="docutils" />
+<section id="directory-descriptions">
+<h1>Directory Descriptions<a class="headerlink" href="#directory-descriptions" title="Link to this heading"></a></h1>
+<section id="cache">
+<h2>.cache/<a class="headerlink" href="#cache" title="Link to this heading"></a></h2>
+<p>Temporary cache files used during preprocessing and feature extraction.</p>
+<p>Typical contents may include:</p>
+<ul class="simple">
+<li><p>intermediate preprocessing artifacts</p></li>
+<li><p>cached metadata</p></li>
+<li><p>multiprocessing cache files</p></li>
+<li><p>temporary feature representations</p></li>
+</ul>
+<p>This directory can usually be regenerated safely.</p>
+</section>
+<hr class="docutils" />
+<section id="genes">
+<h2>genes/<a class="headerlink" href="#genes" title="Link to this heading"></a></h2>
+<p>Gene-related outputs and processed transcriptomics information.</p>
+<p>Typical contents may include:</p>
+<ul class="simple">
+<li><p>highly variable gene (HVG) lists</p></li>
+<li><p>selected gene panels</p></li>
+<li><p>normalized gene metadata</p></li>
+<li><p>gene filtering results</p></li>
+</ul>
+<p>Example:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>genes/
+├── var_250genes.json
+└── ...
+</pre></div>
+</div>
+</section>
+<hr class="docutils" />
+<section id="metadata">
+<h2>metadata/<a class="headerlink" href="#metadata" title="Link to this heading"></a></h2>
+<p>Dataset-level metadata files.</p>
+<p>Typical contents may include:</p>
+<ul class="simple">
+<li><p>sample metadata</p></li>
+<li><p>patient information</p></li>
+<li><p>dataset annotations</p></li>
+<li><p>experimental configuration files</p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="patches">
+<h2>patches/<a class="headerlink" href="#patches" title="Link to this heading"></a></h2>
+<p>HDF5 patch datasets extracted from Whole Slide Images (WSIs).</p>
+<p>Each <code class="docutils literal notranslate"><span class="pre">.h5</span></code> file typically contains:</p>
+<ul class="simple">
+<li><p>patch images</p></li>
+<li><p>patch coordinates</p></li>
+<li><p>spatial transcriptomics barcodes</p></li>
+</ul>
+<p>Example:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>patches/
+├── NCBI681.h5
+├── NCBI682.h5
+└── ...
+</pre></div>
+</div>
+<p>These files are commonly used as the primary image source for downstream analysis.</p>
+</section>
+<hr class="docutils" />
+<section id="patches-vis">
+<h2>patches_vis/<a class="headerlink" href="#patches-vis" title="Link to this heading"></a></h2>
+<p>Visualization outputs for extracted patches.</p>
+<p>Typical outputs include:</p>
+<ul class="simple">
+<li><p>patch grids</p></li>
+<li><p>sampled patch previews</p></li>
+<li><p>quality control visualizations</p></li>
+</ul>
+<p>These files are intended for human inspection and debugging.</p>
+</section>
+<hr class="docutils" />
+<section id="radiomics">
+<h2>radiomics/<a class="headerlink" href="#radiomics" title="Link to this heading"></a></h2>
+<p>Extracted radiomics feature files.</p>
+<p>Typical outputs include:</p>
+<ul class="simple">
+<li><p>patch-level radiomics features</p></li>
+<li><p>cell-aware radiomics features</p></li>
+<li><p>PyRadiomics-based handcrafted descriptors</p></li>
+</ul>
+<p>Depending on the pipeline configuration, outputs may be stored in:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">.parquet</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">.csv</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">.h5ad</span></code></p></li>
+</ul>
+<p>Example:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>radiomics/
+├── NCBI681.h5ad
+├── NCBI682.h5ad
+└── ...
+</pre></div>
+</div>
+</section>
+<hr class="docutils" />
+<section id="radiomics-stats">
+<h2>radiomics_stats/<a class="headerlink" href="#radiomics-stats" title="Link to this heading"></a></h2>
+<p>Statistical summaries and diagnostic outputs for radiomics features.</p>
+<p>Typical outputs include:</p>
+<ul class="simple">
+<li><p>feature distributions</p></li>
+<li><p>normalization statistics</p></li>
+<li><p>clipping statistics</p></li>
+<li><p>feature variance analysis</p></li>
+<li><p>summary plots</p></li>
+</ul>
+<p>This directory is useful for feature quality assessment and debugging.</p>
+</section>
+<hr class="docutils" />
+<section id="segment">
+<h2>segment/<a class="headerlink" href="#segment" title="Link to this heading"></a></h2>
+<p>Cell segmentation outputs stored in HDF5 format.</p>
+<p>Each segmentation file contains:</p>
+<ul class="simple">
+<li><p>polygon-based cell boundaries</p></li>
+<li><p>cell type annotations</p></li>
+<li><p>patch-to-cell mappings</p></li>
+<li><p>segmentation metadata</p></li>
+</ul>
+<p>Example:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>segment/
+├── NCBI681.h5
+├── NCBI682.h5
+└── ...
+</pre></div>
+</div>
+<p>See also:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">outputs/segment.md</span></code></p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="segment-vis">
+<h2>segment_vis/<a class="headerlink" href="#segment-vis" title="Link to this heading"></a></h2>
+<p>Visualization outputs for segmentation results.</p>
+<p>Typical outputs include:</p>
+<ul class="simple">
+<li><p>segmentation overlays</p></li>
+<li><p>polygon rendering</p></li>
+<li><p>cell boundary visualizations</p></li>
+<li><p>class-colored segmentation maps</p></li>
+</ul>
+<p>These outputs are useful for validating segmentation quality.</p>
+</section>
+<hr class="docutils" />
+<section id="spatial-plots">
+<h2>spatial_plots/<a class="headerlink" href="#spatial-plots" title="Link to this heading"></a></h2>
+<p>Spatial transcriptomics visualization outputs.</p>
+<p>Typical plots may include:</p>
+<ul class="simple">
+<li><p>gene expression heatmaps</p></li>
+<li><p>spatial feature maps</p></li>
+<li><p>cluster visualizations</p></li>
+<li><p>tissue overlays</p></li>
+</ul>
+<p>These visualizations help interpret spatial biological patterns.</p>
+</section>
+<hr class="docutils" />
+<section id="st">
+<h2>st/<a class="headerlink" href="#st" title="Link to this heading"></a></h2>
+<p>Spatial transcriptomics datasets.</p>
+<p>Typically stored in H5AD format.</p>
+<p>Example:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>st/
+├── NCBI681.h5ad
+├── NCBI682.h5ad
+└── ...
+</pre></div>
+</div>
+<p>These files commonly contain:</p>
+<ul class="simple">
+<li><p>gene expression matrices</p></li>
+<li><p>spot coordinates</p></li>
+<li><p>transcriptomics metadata</p></li>
+<li><p>spatial annotations</p></li>
+</ul>
+</section>
+<hr class="docutils" />
+<section id="thumbnails">
+<h2>thumbnails/<a class="headerlink" href="#thumbnails" title="Link to this heading"></a></h2>
+<p>Low-resolution thumbnail images of WSIs.</p>
+<p>Used for:</p>
+<ul class="simple">
+<li><p>quick preview</p></li>
+<li><p>visualization</p></li>
+<li><p>coordinate alignment</p></li>
+<li><p>debugging</p></li>
+</ul>
+<p>These images provide a lightweight representation of the original slide.</p>
+</section>
+</section>
+<hr class="docutils" />
+<section id="typical-workflow">
+<h1>Typical Workflow<a class="headerlink" href="#typical-workflow" title="Link to this heading"></a></h1>
+<p>The general pipeline workflow is:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>WSI
+  ↓
+Patch Extraction
+  ↓
+Segmentation
+  ↓
+Radiomics Extraction
+  ↓
+Spatial Transcriptomics Integration
+  ↓
+Visualization / Analysis
+</pre></div>
+</div>
+<p>Generated outputs are progressively stored in the directories described above.</p>
+</section>
+<hr class="docutils" />
+<section id="notes">
+<h1>Notes<a class="headerlink" href="#notes" title="Link to this heading"></a></h1>
+<ul class="simple">
+<li><p>Most outputs are generated automatically by the pipeline.</p></li>
+<li><p>Intermediate directories may vary depending on the extraction configuration.</p></li>
+<li><p>Some visualization directories are optional.</p></li>
+<li><p>Large datasets may require substantial storage space.</p></li>
+<li><p>HDF5-based storage is used extensively for scalability and efficient I/O.</p></li>
+</ul>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="../dataset.html" class="btn btn-neutral float-left" title="Dataset" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="radiomics.html" class="btn btn-neutral float-right" title="Radiomics Output Format" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Huigyoeng Son.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
