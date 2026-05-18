@@ -6,8 +6,8 @@ from hestradiomics.hest import (
     download_hest,
     geneset_extraction,
 )
-from hestradiomics.segment.pipeline import (
-    segment_all_oncotrees_from_config,
+from hestradiomics.segment import (
+    segment_all_oncotrees,
 )
 from hestradiomics.analysis import (
     run_visualization_from_config,
@@ -62,18 +62,24 @@ def main():
     # -------------------------------------------------------------------------
     # 3. Segment HEST Patches
     # -------------------------------------------------------------------------
-    segment_paths = segment_all_oncotrees_from_config(
-        download_cfg=hest_config,
-        cellseg_cfg=segment_config,
+
+    segment_all_oncotrees(
+        hest_root=download_dir,
+        oncotrees=hest_config.oncotrees,
+        model_path=segment_config.model_path,
         sample_ids=sample_ids,
+        batch_size=segment_config.batch_size,
+        num_workers=segment_config.num_workers,
+        device=segment_config.device,
+        overwrite=segment_config.overwrite_segment,
     )
 
-    print(f"[DONE] Segmented {len(segment_paths)} samples.")
     print("\n-------------------------------------------------------------------------\n")
 
     # -------------------------------------------------------------------------
     # 4. Visualize Patches / Segment Overlays
     # -------------------------------------------------------------------------
+    
     run_visualization_from_config(CONFIG)
 
     save_overlays_all_oncotrees_from_config(
