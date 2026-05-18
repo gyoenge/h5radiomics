@@ -22,6 +22,7 @@ def main():
         download_cfg=download_cfg,
         sample_ids=sample_ids,
     )
+    print("\n-------------------------------------------------------------------------\n")
 
     # -------------------------------------------------------------------------
     # 2. Extract Gene Sets
@@ -33,6 +34,7 @@ def main():
         criteria_values=("var", "mean"),
         min_cells_pct=0.1,
     )
+    print("\n-------------------------------------------------------------------------\n")
 
     # -------------------------------------------------------------------------
     # 3. Segment HEST Patches
@@ -42,8 +44,7 @@ def main():
         cellseg_cfg=cellseg_cfg,
         sample_ids=sample_ids,
     )
-
-    print(f"[DONE] Segmented {len(segment_paths)} samples.")
+    print("\n-------------------------------------------------------------------------\n")
 
 
 if __name__ == "__main__":
