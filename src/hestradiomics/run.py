@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hestradiomics.config import DownloadConfig
+from hestradiomics.config import CONFIG
 from hestradiomics.hest import (
     run_download,
     run_gene_extraction,
@@ -8,14 +8,15 @@ from hestradiomics.hest import (
 
 
 def main():
-    download_cfg = DownloadConfig()
+    sample_ids = CONFIG.sample_ids
+    download_cfg = CONFIG.download
 
     # -------------------------------------------------------------------------
     # 1. Download HEST
     # -------------------------------------------------------------------------
     run_download(
         download_cfg=download_cfg,
-        sample_ids=None,
+        sample_ids=sample_ids,
     )
 
     # -------------------------------------------------------------------------
@@ -23,7 +24,7 @@ def main():
     # -------------------------------------------------------------------------
     run_gene_extraction(
         download_cfg=download_cfg,
-        sample_ids=None,
+        sample_ids=sample_ids,
 
         k_values=(
             50,
@@ -42,4 +43,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
