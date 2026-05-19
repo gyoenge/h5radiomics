@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import os
 import json
-from pathlib import Path
+import os
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import geopandas as gpd
 import h5py
 import numpy as np
 import pandas as pd
-from shapely import wkt
-from shapely.geometry import shape
 from torch.utils.data import Dataset
 
 from hestradiomics.utils import ensure_uint8_rgb
@@ -88,96 +85,6 @@ def collate_patches(
     }
 
 
-def save_cellseg_h5(
-    rows: List[Dict[str, Any]],
-    summary_rows: List[Dict[str, Any]],
-    save_path: str,
-) -> str:
-    import os
-
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
-    str_dtype = h5py.string_dtype(encoding="utf-8")
-
-    with h5py.File(save_path, "w") as f:
-        cells_grp = f.create_group("cells")
-        patches_grp = f.create_group("patches")
-
-        if rows:
-            cells_grp.create_dataset(
-                "patch_idx",
-                data=np.asarray([row["patch_idx"] for row in rows], dtype=np.int64),
-                compression="gzip",
-            )
-            cells_grp.create_dataset(
-                "barcode",
-                data=np.asarray([row["barcode"] for row in rows], dtype=object),
-                dtype=str_dtype,
-                compression="gzip",
-            )
-            cells_grp.create_dataset(
-                "cell_id_in_patch",
-                data=np.asarray([row["cell_id_in_patch"] for row in rows], dtype=np.int64),
-                compression="gzip",
-            )
-            cells_grp.create_dataset(
-                "class_id",
-                data=np.asarray([row["class_id"] for row in rows], dtype=np.int64),
-                compression="gzip",
-            )
-            cells_grp.create_dataset(
-                "class_name",
-                data=np.asarray([row["class_name"] for row in rows], dtype=object),
-                dtype=str_dtype,
-                compression="gzip",
-            )
-            cells_grp.create_dataset(
-                "geometry_wkt",
-                data=np.asarray([row["geometry"].wkt for row in rows], dtype=object),
-                dtype=str_dtype,
-                compression="gzip",
-            )
-        else:
-            cells_grp.create_dataset("patch_idx", data=np.asarray([], dtype=np.int64))
-            cells_grp.create_dataset("barcode", data=np.asarray([], dtype=object), dtype=str_dtype)
-            cells_grp.create_dataset("cell_id_in_patch", data=np.asarray([], dtype=np.int64))
-            cells_grp.create_dataset("class_id", data=np.asarray([], dtype=np.int64))
-            cells_grp.create_dataset("class_name", data=np.asarray([], dtype=object), dtype=str_dtype)
-            cells_grp.create_dataset("geometry_wkt", data=np.asarray([], dtype=object), dtype=str_dtype)
-
-        patches_grp.create_dataset(
-            "patch_idx",
-            data=np.asarray([row["patch_idx"] for row in summary_rows], dtype=np.int64),
-            compression="gzip",
-        )
-        patches_grp.create_dataset(
-            "barcode",
-            data=np.asarray([row["barcode"] for row in summary_rows], dtype=object),
-            dtype=str_dtype,
-            compression="gzip",
-        )
-        patches_grp.create_dataset(
-            "n_cells",
-            data=np.asarray([row["n_cells"] for row in summary_rows], dtype=np.int64),
-            compression="gzip",
-        )
-
-        if summary_rows and "coord_raw" in summary_rows[0]:
-            coord_json = [
-                json.dumps(row["coord_raw"], ensure_ascii=False)
-                for row in summary_rows
-            ]
-
-            patches_grp.create_dataset(
-                "coord_raw_json",
-                data=np.asarray(coord_json, dtype=object),
-                dtype=str_dtype,
-                compression="gzip",
-            )
-
-    return save_path
-
-
 def gdf_to_cell_rows(
     gdf: gpd.GeoDataFrame,
     patch_idx: int,
@@ -214,6 +121,69 @@ def gdf_to_cell_rows(
         )
 
     return rows
+
+
+def save_cellseg_parquet(
+    rows: List[Dict[str, Any]],
+    summary_rows: List[Dict[str, Any]],
+    save_path: str,
+) -> str:
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    if rows:
+        cell_gdf = gpd.GeoDataFrame(
+            rows,
+            geometry="geometry",
+            crs=None,
+        )
+    else:
+        cell_gdf = gpd.GeoDataFrame(
+            {
+                "patch_idx": pd.Series(dtype="int64"),
+                "barcode": pd.Series(dtype="str"),
+                "cell_id_in_patch": pd.Series(dtype="int64"),
+                "class_id": pd.Series(dtype="int64"),
+                "class_name": pd.Series(dtype="str"),
+                "geometry": [],
+            },
+            geometry="geometry",
+            crs=None,
+        )
+
+    summary_df = pd.DataFrame(summary_rows)
+
+    if not summary_df.empty:
+        # coord_raw는 list라 parquet 저장은 가능하지만,
+        # 안정성을 위해 JSON 문자열 컬럼도 같이 둔다.
+        if "coord_raw" in summary_df.columns:
+            summary_df["coord_raw_json"] = summary_df["coord_raw"].apply(
+                lambda x: json.dumps(x, ensure_ascii=False)
+                if x is not None
+                else None
+            )
+
+        cell_gdf = cell_gdf.merge(
+            summary_df,
+            on=["patch_idx", "barcode"],
+            how="left",
+        )
+    else:
+        cell_gdf["coord_raw"] = None
+        cell_gdf["coord_raw_json"] = None
+        cell_gdf["n_cells"] = 0
+
+    cell_gdf.to_parquet(
+        save_path,
+        index=False,
+    )
+
+    return save_path
+
+
+def load_cellseg_parquet(
+    parquet_path: str,
+) -> gpd.GeoDataFrame:
+    return gpd.read_parquet(parquet_path)
 
 
 def list_sample_ids_from_patches(
@@ -260,7 +230,7 @@ def build_sample_paths(
         "patch_h5_path": os.path.join(data_root, "patches", f"{sample_id}.h5"),
         "segment_dir": segment_dir,
         "segment_vis_dir": segment_vis_dir,
-        "seg_h5_path": os.path.join(segment_dir, f"{sample_id}.h5"),
+        "seg_parquet_path": os.path.join(segment_dir, f"{sample_id}.parquet"),
         "summary_json_path": os.path.join(segment_dir, f"{sample_id}.summary.json"),
         "runtime_dir": os.path.join(segment_dir, "_cellvit_runtime"),
         "overlay_dir": os.path.join(segment_vis_dir, sample_id),

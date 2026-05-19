@@ -4,23 +4,21 @@ import math
 import os
 from typing import List, Optional, Tuple
 
-from shapely.geometry import Polygon
-import pandas as pd
-import h5py
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from matplotlib.collections import PatchCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon as MplPolygon
 from tqdm import tqdm
-
 
 from hestradiomics.segment.adapter import iter_polygons
 from hestradiomics.segment.io import (
     H5PatchDataset,
     build_sample_paths,
     list_sample_ids_from_patches,
+    load_cellseg_parquet,
 )
 from hestradiomics.utils import ensure_uint8_rgb, filter_sample_ids
 
@@ -70,68 +68,64 @@ def _select_patch_indices(
     return [patch_indices_all[i] for i in selected_positions]
 
 
-def load_cellseg_h5(seg_h5_path):
-    rows = []
-
-    with h5py.File(seg_h5_path, "r") as f:
-        print("[H5 KEYS]", list(f.keys()))
-
-        def print_tree(name, obj):
-            if isinstance(obj, h5py.Dataset):
-                print(name, obj.shape, obj.dtype)
-            else:
-                print(name)
-        f.visititems(print_tree)
-
-        # 실제 key 이름 확인 필요
-        # 예: cells/contours, cells/patch_idx, cells/class_name 등
-        contours = f["contours"][:]
-        patch_indices = f["patch_idx"][:]
-
-        classes = None
-        if "class_name" in f:
-            classes = f["class_name"][:]
-
-        for i, contour in enumerate(contours):
-            contour = np.asarray(contour)
-
-            if contour.ndim != 2 or contour.shape[0] < 3:
-                continue
-
-            geom = Polygon(contour)
-
-            if not geom.is_valid or geom.is_empty:
-                continue
-
-            row = {
-                "patch_idx": int(patch_indices[i]),
-                "geometry": geom,
-            }
-
-            if classes is not None:
-                cls = classes[i]
-                if isinstance(cls, bytes):
-                    cls = cls.decode()
-                row["class_name"] = cls
-
-            rows.append(row)
-
-    seg_df = pd.DataFrame(rows)
-
-    if seg_df.empty:
-        return gpd.GeoDataFrame(
-            seg_df,
-            geometry=[],
-            crs=None,
-        ), pd.DataFrame()
-
-    seg_gdf = gpd.GeoDataFrame(
-        seg_df,
+def _empty_cellseg_gdf() -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(
+        {
+            "patch_idx": pd.Series(dtype="int64"),
+            "barcode": pd.Series(dtype="str"),
+            "cell_id_in_patch": pd.Series(dtype="int64"),
+            "class_id": pd.Series(dtype="int64"),
+            "class_name": pd.Series(dtype="str"),
+            "geometry": [],
+        },
         geometry="geometry",
         crs=None,
     )
 
-    return seg_gdf, pd.DataFrame()
+
+def load_cellseg_for_overlay(
+    seg_parquet_path: str,
+) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
+    seg_gdf = load_cellseg_parquet(seg_parquet_path)
+
+    if seg_gdf.empty:
+        return _empty_cellseg_gdf(), pd.DataFrame(
+            columns=["patch_idx", "barcode", "n_cells"]
+        )
+
+    if "patch_idx" not in seg_gdf.columns:
+        raise KeyError("segment parquet must contain 'patch_idx' column.")
+
+    if "barcode" not in seg_gdf.columns:
+        seg_gdf["barcode"] = seg_gdf["patch_idx"].astype(str)
+
+    if "class_name" not in seg_gdf.columns:
+        seg_gdf["class_name"] = "unknown"
+
+    if "class_id" not in seg_gdf.columns:
+        seg_gdf["class_id"] = -1
+
+    if "cell_id_in_patch" not in seg_gdf.columns:
+        seg_gdf["cell_id_in_patch"] = seg_gdf.groupby("patch_idx").cumcount() + 1
+
+    seg_gdf["patch_idx"] = seg_gdf["patch_idx"].astype(int)
+
+    if "n_cells" in seg_gdf.columns:
+        patch_df = (
+            seg_gdf[["patch_idx", "barcode", "n_cells"]]
+            .drop_duplicates(subset=["patch_idx"])
+            .copy()
+        )
+    else:
+        patch_df = (
+            seg_gdf.groupby(["patch_idx", "barcode"], as_index=False)
+            .size()
+            .rename(columns={"size": "n_cells"})
+        )
+
+    patch_df["patch_idx"] = patch_df["patch_idx"].astype(int)
+
+    return seg_gdf, patch_df
 
 
 def save_overlay_png(
@@ -193,16 +187,24 @@ def save_overlay_png(
             )
 
     if use_class_color:
+        present_classes = (
+            set(gdf["class_name"].astype(str).str.lower())
+            if len(gdf) > 0 and "class_name" in gdf.columns
+            else set()
+        )
+
         handles = [
             Line2D([0], [0], color=color, lw=2, label=class_name)
             for class_name, color in CLASS_COLOR_MAP.items()
+            if class_name in present_classes
         ]
 
-        ax.legend(
-            handles=handles,
-            loc="lower left",
-            fontsize=8,
-        )
+        if handles:
+            ax.legend(
+                handles=handles,
+                loc="lower left",
+                fontsize=8,
+            )
 
     if title:
         ax.set_title(title)
@@ -224,9 +226,9 @@ def save_overlay_png(
     plt.close(fig)
 
 
-def save_overlays_from_cellseg_h5(
+def save_overlays_from_cellseg_parquet(
     source_h5_path: str,
-    seg_h5_path: str,
+    seg_parquet_path: str,
     overlay_dir: str,
     use_class_color: bool = True,
     vis_ratio: float = 1.0,
@@ -235,7 +237,11 @@ def save_overlays_from_cellseg_h5(
 ) -> str:
     os.makedirs(overlay_dir, exist_ok=True)
 
-    seg_gdf, patch_df = load_cellseg_h5(seg_h5_path)
+    seg_gdf, patch_df = load_cellseg_for_overlay(seg_parquet_path)
+
+    if patch_df.empty:
+        print(f"[WARN] empty segment parquet: {seg_parquet_path}")
+        return overlay_dir
 
     all_patch_indices = patch_df["patch_idx"].astype(int).tolist()
 
@@ -272,15 +278,7 @@ def save_overlays_from_cellseg_h5(
 
         gdf = gdf_by_patch.get(
             patch_idx,
-            gpd.GeoDataFrame(
-                {
-                    "cell_id_in_patch": [],
-                    "class_id": [],
-                    "class_name": [],
-                },
-                geometry=[],
-                crs=None,
-            ),
+            _empty_cellseg_gdf(),
         )
 
         save_path = os.path.join(
@@ -318,15 +316,15 @@ def save_overlay_one_sample(
     )
 
     patch_h5_path = paths["patch_h5_path"]
-    seg_h5_path = paths["seg_h5_path"]
+    seg_parquet_path = paths["seg_parquet_path"]
     overlay_dir = paths["overlay_dir"]
 
     if not os.path.exists(patch_h5_path):
         print(f"[WARN] patch h5 not found: {patch_h5_path}")
         return None
 
-    if not os.path.exists(seg_h5_path):
-        print(f"[WARN] segment h5 not found: {seg_h5_path}")
+    if not os.path.exists(seg_parquet_path):
+        print(f"[WARN] segment parquet not found: {seg_parquet_path}")
         return None
 
     if (
@@ -339,9 +337,9 @@ def save_overlay_one_sample(
         print(f"[SKIP] overlay exists: {overlay_dir}")
         return overlay_dir
 
-    return save_overlays_from_cellseg_h5(
+    return save_overlays_from_cellseg_parquet(
         source_h5_path=patch_h5_path,
-        seg_h5_path=seg_h5_path,
+        seg_parquet_path=seg_parquet_path,
         overlay_dir=overlay_dir,
         use_class_color=use_class_color,
         vis_ratio=vis_ratio,
@@ -405,4 +403,3 @@ def segment_visualization_from_oncotrees(
                 output_dirs.append(overlay_dir)
 
     return output_dirs
-    

@@ -4,9 +4,7 @@ import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-import geopandas as gpd
 import numpy as np
-import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -15,17 +13,17 @@ from hestradiomics.segment.adapter import CellViTInferenceAdapter
 from hestradiomics.segment.io import (
     H5PatchDataset,
     collate_patches,
-    save_cellseg_h5,
-    gdf_to_cell_rows, 
-    list_sample_ids_from_patches, 
-    build_sample_paths
+    save_cellseg_parquet,
+    gdf_to_cell_rows,
+    list_sample_ids_from_patches,
+    build_sample_paths,
 )
 from hestradiomics.utils import filter_sample_ids
 
 
 def segment_h5_patches_with_cellvit(
     h5_path: str,
-    seg_h5_path: str,
+    seg_parquet_path: str,
     model_path: str,
     runtime_dir: str,
     summary_json_path: Optional[str] = None,
@@ -35,7 +33,7 @@ def segment_h5_patches_with_cellvit(
     device: str = "cuda:0",
     predictor: Optional[CellViTInferenceAdapter] = None,
 ) -> str:
-    os.makedirs(os.path.dirname(seg_h5_path), exist_ok=True)
+    os.makedirs(os.path.dirname(seg_parquet_path), exist_ok=True)
     os.makedirs(runtime_dir, exist_ok=True)
 
     dataset = H5PatchDataset(
@@ -56,7 +54,7 @@ def segment_h5_patches_with_cellvit(
         predictor = CellViTInferenceAdapter(
             model_path=model_path,
             model_name=os.path.basename(model_path),
-            output_dir=os.path.dirname(seg_h5_path),
+            output_dir=os.path.dirname(seg_parquet_path),
             runtime_dir=runtime_dir,
             device=device,
         )
@@ -108,19 +106,19 @@ def segment_h5_patches_with_cellvit(
 
     pbar.close()
 
-    save_cellseg_h5(
+    save_cellseg_parquet(
         rows=all_rows,
         summary_rows=summary_rows,
-        save_path=seg_h5_path,
+        save_path=seg_parquet_path,
     )
 
     summary = {
         "h5_path": h5_path,
-        "segment_dir": os.path.dirname(seg_h5_path),
+        "segment_dir": os.path.dirname(seg_parquet_path),
         "runtime_dir": runtime_dir,
         "num_patches": len(dataset),
         "num_polygons": int(len(all_rows)),
-        "seg_h5_path": seg_h5_path,
+        "seg_parquet_path": seg_parquet_path,
     }
 
     if summary_json_path is not None:
@@ -134,7 +132,7 @@ def segment_h5_patches_with_cellvit(
                 ensure_ascii=False,
             )
 
-    return seg_h5_path
+    return seg_parquet_path
 
 
 def segment_one_sample(
@@ -154,19 +152,19 @@ def segment_one_sample(
     )
 
     patch_h5_path = paths["patch_h5_path"]
-    seg_h5_path = paths["seg_h5_path"]
+    seg_parquet_path = paths["seg_parquet_path"]
 
     if not os.path.exists(patch_h5_path):
         print(f"[WARN] patch h5 not found: {patch_h5_path}")
         return None
 
-    if os.path.exists(seg_h5_path) and not overwrite:
-        print(f"[SKIP] segment exists: {seg_h5_path}")
-        return seg_h5_path
+    if os.path.exists(seg_parquet_path) and not overwrite:
+        print(f"[SKIP] segment exists: {seg_parquet_path}")
+        return seg_parquet_path
 
     return segment_h5_patches_with_cellvit(
         h5_path=patch_h5_path,
-        seg_h5_path=seg_h5_path,
+        seg_parquet_path=seg_parquet_path,
         model_path=model_path,
         runtime_dir=paths["runtime_dir"],
         summary_json_path=paths["summary_json_path"],
@@ -204,7 +202,7 @@ def segment_all_oncotrees(
         )
 
         for sample_id in target_sample_ids:
-            seg_h5_path = segment_one_sample(
+            seg_parquet_path = segment_one_sample(
                 hest_root=hest_root,
                 oncotree=oncotree,
                 sample_id=sample_id,
@@ -215,9 +213,7 @@ def segment_all_oncotrees(
                 overwrite=overwrite,
             )
 
-            if seg_h5_path is not None:
-                output_paths.append(seg_h5_path)
+            if seg_parquet_path is not None:
+                output_paths.append(seg_parquet_path)
 
     return output_paths
-
-
