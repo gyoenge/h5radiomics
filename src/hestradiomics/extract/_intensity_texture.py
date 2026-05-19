@@ -15,12 +15,6 @@ from hestradiomics.utils import (
     make_feature_prefix,
 )
 
-import warnings
-warnings.filterwarnings(
-    "ignore",
-    message="GLCM is symmetrical, therefore Sum Average = 2 \\* Joint Average",
-)
-
 # ------------------------------------------------------------------------------
 # Types
 # ------------------------------------------------------------------------------

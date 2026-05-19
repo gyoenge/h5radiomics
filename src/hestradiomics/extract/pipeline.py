@@ -30,6 +30,10 @@ from hestradiomics.utils import (
 )
 
 
+import logging
+logging.getLogger("radiomics").setLevel(logging.ERROR)
+
+
 # =============================================================================
 # H5 utils
 # =============================================================================

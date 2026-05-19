@@ -243,6 +243,7 @@ PATCH_IDX_COLUMN = "patch_idx"
 STATUS_COLUMN = "status"
 MASK_PATH_COLUMN = "mask_path"
 ERROR_COLUMN = "error"
+SAMPLE_ID_COLUMN = "sample_id"
 
 # Status
 STATUS_OK = "ok"
