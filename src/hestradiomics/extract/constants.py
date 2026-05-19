@@ -242,6 +242,11 @@ Metadata / Output Schema Constants
 PATCH_IDX_COLUMN = "patch_idx"
 STATUS_COLUMN = "status"
 MASK_PATH_COLUMN = "mask_path"
+ERROR_COLUMN = "error"
+
+# Status
+STATUS_OK = "ok"
+STATUS_ERROR = "error"
 
 # Area / count statistics columns
 PATCH_MASK_AREA_COLUMN = "patch_mask_area"

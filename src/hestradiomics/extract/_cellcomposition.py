@@ -24,6 +24,9 @@ def _normalize_cell_classes(
 ) -> gpd.GeoDataFrame:
     patch_cellseg = patch_cellseg.copy()
 
+    if CELL_CLASS_COLUMN not in patch_cellseg.columns:
+        patch_cellseg[CELL_CLASS_COLUMN] = UNKNOWN_CELL_CLASS
+
     patch_cellseg[CELL_CLASS_COLUMN] = (
         patch_cellseg[CELL_CLASS_COLUMN]
         .fillna(UNKNOWN_CELL_CLASS)
@@ -67,3 +70,4 @@ class DistributionExtractor:
         patch_cellseg: gpd.GeoDataFrame,
     ) -> Dict[str, float]:
         return extract_cell_type_distribution(patch_cellseg)
+

@@ -117,6 +117,8 @@ def main():
         output_dirname=extract_config.output_dirname,
         mask_source=extract_config.mask_source,
         overwrite=extract_config.overwrite,
+        num_workers=8,
+        chunk_size=64,
     )
 
 if __name__ == "__main__":

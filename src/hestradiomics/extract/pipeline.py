@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
@@ -87,7 +88,10 @@ def load_cellseg_parquet(cellseg_path: str | Path) -> gpd.GeoDataFrame:
 # Radiomics output saver
 # =============================================================================
 
-def _make_h5ad_obs(df: pd.DataFrame, feature_cols: Sequence[str]) -> pd.DataFrame:
+def _make_h5ad_obs(
+    df: pd.DataFrame,
+    feature_cols: Sequence[str],
+) -> pd.DataFrame:
     obs = df.drop(columns=list(feature_cols), errors="ignore").copy()
 
     if obs.index.name is None:
@@ -177,7 +181,7 @@ class PatchProcessor:
             patch_cellseg.geometry.notnull()
         ].copy()
 
-        if len(patch_cellseg) > 0:
+        if len(patch_cellseg) > 0 and CELL_CLASS_COLUMN in patch_cellseg.columns:
             patch_cellseg[CELL_CLASS_COLUMN] = (
                 patch_cellseg[CELL_CLASS_COLUMN]
                 .map(normalize_class_name)
@@ -255,10 +259,8 @@ class PatchProcessor:
         if self.intensity_extractor:
             safe_update_features(
                 row,
-                lambda: self.intensity_extractor.extract_from_mask(
+                lambda: self.intensity_extractor.extract_from_patch(
                     gray_patch=patch.gray_patch,
-                    mask=mask,
-                    prefix="patch_intensity_",
                     use_cache=use_cache,
                 ),
                 ERROR_PATCH_RADIOMICS,
@@ -267,10 +269,8 @@ class PatchProcessor:
         if self.texture_extractor:
             safe_update_features(
                 row,
-                lambda: self.texture_extractor.extract_from_mask(
+                lambda: self.texture_extractor.extract_from_patch(
                     gray_patch=patch.gray_patch,
-                    mask=mask,
-                    prefix="patch_texture_",
                     use_cache=use_cache,
                 ),
                 ERROR_PATCH_RADIOMICS,
@@ -314,7 +314,6 @@ class PatchProcessor:
                 lambda: self.intensity_extractor.extract_from_cellseg(
                     gray_patch=patch.gray_patch,
                     patch_cellseg=patch_cellseg,
-                    prefix="cellseg_intensity_",
                     use_cache=use_cache,
                 ),
                 ERROR_CELLSEG_RADIOMICS,
@@ -326,7 +325,6 @@ class PatchProcessor:
                 lambda: self.texture_extractor.extract_from_cellseg(
                     gray_patch=patch.gray_patch,
                     patch_cellseg=patch_cellseg,
-                    prefix="cellseg_texture_",
                     use_cache=use_cache,
                 ),
                 ERROR_CELLSEG_RADIOMICS,
@@ -382,77 +380,35 @@ def build_default_patch_processor(
     )
 
 
-def process_single_patch(
-    f: h5py.File,
-    img_key: str,
-    coords_key: str,
-    barcodes_key: str,
-    i: int,
+# =============================================================================
+# Multiprocessing helpers
+# =============================================================================
+
+def chunk_indices(
+    n_items: int,
+    chunk_size: int,
+) -> list[list[int]]:
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be positive. Got: {chunk_size}")
+
+    return [
+        list(range(start, min(start + chunk_size, n_items)))
+        for start in range(0, n_items, chunk_size)
+    ]
+
+
+def process_patch_chunk_worker(
+    patch_path: str,
+    indices: list[int],
     output_dir: str,
     sample_id: str,
-    mask_source: str = MASK_SOURCE_THRESHOLD,
-    cellseg_df: Optional[gpd.GeoDataFrame] = None,
-    filters: Optional[Sequence[str]] = None,
-    label: int = EXTRACTOR_DEFAULT_LABEL,
-    use_cache: bool = True,
-) -> Dict[str, Any]:
-    processor = build_default_patch_processor(
-        filters=filters,
-        label=label,
-    )
-
-    return processor.process_single_patch(
-        f=f,
-        img_key=img_key,
-        coords_key=coords_key,
-        barcodes_key=barcodes_key,
-        i=i,
-        output_dir=output_dir,
-        sample_id=sample_id,
-        mask_source=mask_source,
-        cellseg_df=cellseg_df,
-        use_cache=use_cache,
-    )
-
-
-# =============================================================================
-# Sample-level extraction
-# =============================================================================
-
-def extract_sample_radiomics(
-    patch_path: str | Path,
-    output_path: str | Path,
-    sample_id: str,
-    output_dir: str | Path,
-    mask_source: str = MASK_SOURCE_THRESHOLD,
-    cellseg_path: Optional[str | Path] = None,
-    filters: Optional[Sequence[str]] = None,
-    label: int = EXTRACTOR_DEFAULT_LABEL,
-    use_cache: bool = True,
-    overwrite: bool = False,
-) -> None:
-    patch_path = Path(patch_path)
-    output_path = Path(output_path)
-    output_dir = Path(output_dir)
-
-    output_parquet_path = output_path.with_suffix(".parquet")
-    output_h5ad_path = output_path.with_suffix(".h5ad")
-
-    if (
-        output_parquet_path.exists()
-        and output_h5ad_path.exists()
-        and not overwrite
-    ):
-        print(
-            f"[SKIP] {sample_id} already exists: "
-            f"{output_parquet_path}, {output_h5ad_path}"
-        )
-        return
-
-    if not patch_path.exists():
-        raise FileNotFoundError(f"Patch file not found: {patch_path}")
-
-    output_parquet_path.parent.mkdir(parents=True, exist_ok=True)
+    mask_source: str,
+    cellseg_path: Optional[str],
+    filters: Optional[Sequence[str]],
+    label: int,
+    use_cache: bool,
+) -> list[Dict[str, Any]]:
+    rows: list[Dict[str, Any]] = []
 
     cellseg_df = None
     if mask_source == MASK_SOURCE_CELLSEG:
@@ -467,11 +423,64 @@ def extract_sample_radiomics(
         label=label,
     )
 
+    with h5py.File(patch_path, "r") as f:
+        img_key, coords_key, barcodes_key = find_h5_keys(f)
+
+        for i in indices:
+            try:
+                row = processor.process_single_patch(
+                    f=f,
+                    img_key=img_key,
+                    coords_key=coords_key,
+                    barcodes_key=barcodes_key,
+                    i=i,
+                    output_dir=output_dir,
+                    sample_id=sample_id,
+                    mask_source=mask_source,
+                    cellseg_df=cellseg_df,
+                    use_cache=use_cache,
+                )
+            except Exception as e:
+                row = {
+                    SAMPLE_ID_COLUMN: sample_id,
+                    PATCH_IDX_COLUMN: i,
+                    STATUS_COLUMN: STATUS_ERROR,
+                    ERROR_COLUMN: str(e),
+                }
+
+            rows.append(row)
+
+    return rows
+
+
+def _extract_rows_single_process(
+    patch_path: Path,
+    output_dir: Path,
+    sample_id: str,
+    mask_source: str,
+    cellseg_path: Optional[str | Path],
+    filters: Optional[Sequence[str]],
+    label: int,
+    use_cache: bool,
+    n_patches: int,
+) -> list[Dict[str, Any]]:
     rows: list[Dict[str, Any]] = []
+
+    cellseg_df = None
+    if mask_source == MASK_SOURCE_CELLSEG:
+        if cellseg_path is None:
+            raise ValueError(
+                f"cellseg_path is required when mask_source='{MASK_SOURCE_CELLSEG}'"
+            )
+        cellseg_df = load_cellseg_parquet(cellseg_path)
+
+    processor = build_default_patch_processor(
+        filters=filters,
+        label=label,
+    )
 
     with h5py.File(patch_path, "r") as f:
         img_key, coords_key, barcodes_key = find_h5_keys(f)
-        n_patches = len(f[img_key])
 
         for i in tqdm(range(n_patches), desc=f"[EXTRACT] {sample_id}"):
             try:
@@ -496,6 +505,134 @@ def extract_sample_radiomics(
                 }
 
             rows.append(row)
+
+    return rows
+
+
+def _extract_rows_multi_process(
+    patch_path: Path,
+    output_dir: Path,
+    sample_id: str,
+    mask_source: str,
+    cellseg_path: Optional[str | Path],
+    filters: Optional[Sequence[str]],
+    label: int,
+    use_cache: bool,
+    n_patches: int,
+    num_workers: int,
+    chunk_size: int,
+) -> list[Dict[str, Any]]:
+    rows: list[Dict[str, Any]] = []
+    chunks = chunk_indices(n_patches, chunk_size=chunk_size)
+
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        futures = [
+            executor.submit(
+                process_patch_chunk_worker,
+                str(patch_path),
+                chunk,
+                str(output_dir),
+                sample_id,
+                mask_source,
+                str(cellseg_path) if cellseg_path is not None else None,
+                filters,
+                label,
+                use_cache,
+            )
+            for chunk in chunks
+        ]
+
+        for future in tqdm(
+            as_completed(futures),
+            total=len(futures),
+            desc=f"[EXTRACT-MP] {sample_id}",
+        ):
+            rows.extend(future.result())
+
+    rows = sorted(
+        rows,
+        key=lambda x: x.get(PATCH_IDX_COLUMN, -1),
+    )
+
+    return rows
+
+
+# =============================================================================
+# Sample-level extraction
+# =============================================================================
+
+def extract_sample_radiomics(
+    patch_path: str | Path,
+    output_path: str | Path,
+    sample_id: str,
+    output_dir: str | Path,
+    mask_source: str = MASK_SOURCE_THRESHOLD,
+    cellseg_path: Optional[str | Path] = None,
+    filters: Optional[Sequence[str]] = None,
+    label: int = EXTRACTOR_DEFAULT_LABEL,
+    use_cache: bool = True,
+    overwrite: bool = False,
+    num_workers: int = 1,
+    chunk_size: int = 64,
+) -> None:
+    patch_path = Path(patch_path)
+    output_path = Path(output_path)
+    output_dir = Path(output_dir)
+
+    output_parquet_path = output_path.with_suffix(".parquet")
+    output_h5ad_path = output_path.with_suffix(".h5ad")
+
+    if (
+        output_parquet_path.exists()
+        and output_h5ad_path.exists()
+        and not overwrite
+    ):
+        print(
+            f"[SKIP] {sample_id} already exists: "
+            f"{output_parquet_path}, {output_h5ad_path}"
+        )
+        return
+
+    if not patch_path.exists():
+        raise FileNotFoundError(f"Patch file not found: {patch_path}")
+
+    if mask_source == MASK_SOURCE_CELLSEG and cellseg_path is None:
+        raise ValueError(
+            f"cellseg_path is required when mask_source='{MASK_SOURCE_CELLSEG}'"
+        )
+
+    output_parquet_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with h5py.File(patch_path, "r") as f:
+        img_key, _, _ = find_h5_keys(f)
+        n_patches = len(f[img_key])
+
+    if num_workers <= 1:
+        rows = _extract_rows_single_process(
+            patch_path=patch_path,
+            output_dir=output_dir,
+            sample_id=sample_id,
+            mask_source=mask_source,
+            cellseg_path=cellseg_path,
+            filters=filters,
+            label=label,
+            use_cache=use_cache,
+            n_patches=n_patches,
+        )
+    else:
+        rows = _extract_rows_multi_process(
+            patch_path=patch_path,
+            output_dir=output_dir,
+            sample_id=sample_id,
+            mask_source=mask_source,
+            cellseg_path=cellseg_path,
+            filters=filters,
+            label=label,
+            use_cache=use_cache,
+            n_patches=n_patches,
+            num_workers=num_workers,
+            chunk_size=chunk_size,
+        )
 
     raw_df = pd.DataFrame(rows)
 
@@ -540,6 +677,8 @@ def extract_all_oncotrees(
     label: int = EXTRACTOR_DEFAULT_LABEL,
     use_cache: bool = True,
     overwrite: bool = False,
+    num_workers: int = 1,
+    chunk_size: int = 64,
 ) -> None:
     hest_root = Path(hest_root)
 
@@ -568,6 +707,8 @@ def extract_all_oncotrees(
         print(f"[MASK SOURCE] {mask_source}")
         print(f"[USE CACHE] {use_cache}")
         print(f"[OVERWRITE] {overwrite}")
+        print(f"[NUM WORKERS] {num_workers}")
+        print(f"[CHUNK SIZE] {chunk_size}")
         print("=" * 80)
 
         for patch_path in patch_paths:
@@ -592,7 +733,10 @@ def extract_all_oncotrees(
                     label=label,
                     use_cache=use_cache,
                     overwrite=overwrite,
+                    num_workers=num_workers,
+                    chunk_size=chunk_size,
                 )
 
             except Exception as e:
                 print(f"[ERROR] {oncotree}/{sample_id}: {e}")
+
