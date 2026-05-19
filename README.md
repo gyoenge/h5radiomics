@@ -7,6 +7,7 @@
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Radiomics feature extraction pipeline for HEST spatial transcriptomics datasets using WSI patches, cell segmentation, and PyRadiomics-based handcrafted features. 
+See the description in [ReadTheDocs](https://hest-radiomics.readthedocs.io/en/latest/index.html). 
 
 ![Overview](docs/_static/hest_radiomics_overview.png)
 
