@@ -126,6 +126,15 @@ def save_processed_radiomics_outputs(
 
     feature_cols = get_radiomics_feature_columns(processed_df)
 
+    feature_list_txt_path = (
+        output_parquet_path.parent
+        / f"{output_parquet_path.stem}_feature_list.txt"
+    )
+    with open(feature_list_txt_path, "w") as f:
+        for feature_name in feature_cols:
+            f.write(f"{feature_name}\n")
+
+
     X = (
         processed_df[feature_cols]
         .apply(pd.to_numeric, errors="coerce")
