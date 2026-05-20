@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field 
 from pathlib import Path 
-from typing import Optional 
+from typing import Optional, List
 
 
 # ============================================================
@@ -105,8 +105,11 @@ class VisualizeConfig:
 
 @dataclass(frozen=True)
 class StatisticsConfig: 
-    output_dirname: str = "statistics"
-    overwrite: bool = True 
+    # output_dirname: str = "statistics"
+    # overwrite: bool = True 
+    save_boxplot: bool = True,
+    save_representative: bool = True,
+    representative_stats: List[str] = ["min", "q25", "q50", "q75", "max"],
 
 
 # ============================================================

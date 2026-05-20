@@ -20,6 +20,7 @@ from hestradiomics.extract import (
 from hestradiomics.analysis import (
     patch_visualization_from_oncotrees,
     segment_visualization_from_oncotrees, 
+    statistics_analysis_from_oncotrees, 
 )
 
 
@@ -125,6 +126,25 @@ def main():
     #     num_workers=2,
     #     chunk_size=16,
     # )
+
+    # print("[DONE] Radiomics extraction completed.")
+    # print("\n-------------------------------------------------------------------------\n")
+
+    # -------------------------------------------------------------------------
+    # 6. Analysis Radiomics Statistics 
+    # -------------------------------------------------------------------------
+
+    statistics_analysis_from_oncotrees(
+        download_dir=download_dir, 
+        oncotrees=hest_config.oncotrees, 
+        sample_ids=sample_ids,
+        save_boxplot=statstics_config.save_boxplot,
+        save_representative=statstics_config.save_representative,
+        representative_stats=statstics_config.representative_stats,
+    )
+
+    print("[DONE] Statistics analysis completed.")
+    print("\n-------------------------------------------------------------------------\n")
 
 
 if __name__ == "__main__":

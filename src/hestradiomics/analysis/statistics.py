@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from hestradiomics.utils import filter_sample_ids
+
 
 # =============================================================================
 # Config
@@ -396,57 +398,147 @@ def save_representative_visualizations(
 # Main Pipeline
 # =============================================================================
 
-def process_single_sample(sample_id: str) -> None:
-    parquet_path = RADIOMICS_DIR / f"{sample_id}.parquet"
-    patch_h5_path = PATCH_DIR / f"{sample_id}.h5"
 
-    sample_output_dir = OUTPUT_DIR / sample_id
-    ensure_dir(sample_output_dir)
+def process_single_sample_statistics(
+    sample_id: str,
+    parquet_path: str | Path,
+    patch_h5_path: Optional[str | Path],
+    output_dir: str | Path,
+    status_filter: Optional[str] = "ok",
+    save_boxplot: bool = True,
+    save_representative: bool = True,
+    representative_stats: Optional[List[str]] = None,
+) -> None:
+    parquet_path = Path(parquet_path)
+    output_dir = Path(output_dir)
 
-    print("=" * 80)
-    print(f"[SAMPLE] {sample_id}")
-    print(f"[PARQUET] {parquet_path}")
-    print(f"[PATCH H5] {patch_h5_path}")
-    print(f"[OUTPUT] {sample_output_dir}")
+    if representative_stats is None:
+        representative_stats = ["min", "q25", "q50", "q75", "max"]
+
+    ensure_dir(output_dir)
 
     if not parquet_path.exists():
         raise FileNotFoundError(f"Missing parquet: {parquet_path}")
 
-    if not patch_h5_path.exists():
-        raise FileNotFoundError(f"Missing patch h5: {patch_h5_path}")
+    print(f"[PARQUET] {parquet_path}")
+    print(f"[OUTPUT] {output_dir}")
 
-    df = load_radiomics_parquet(parquet_path)
+    df = load_radiomics_parquet(
+        parquet_path=parquet_path,
+        status_filter=status_filter,
+    )
+
     feature_cols = get_feature_columns(df)
 
     print(f"[ROWS] {len(df)}")
     print(f"[FEATURE COLS] {len(feature_cols)}")
 
     stats_df = compute_feature_statistics(df, feature_cols)
-    save_feature_statistics(stats_df, sample_output_dir)
+    save_feature_statistics(stats_df, output_dir)
 
-    save_boxplots_by_class(
-        df=df,
-        feature_cols=feature_cols,
-        output_dir=sample_output_dir,
-        sample_id=sample_id,
-    )
+    if save_boxplot:
+        save_boxplots_by_class(
+            df=df,
+            feature_cols=feature_cols,
+            output_dir=output_dir,
+            sample_id=sample_id,
+        )
 
-    save_representative_visualizations(
-        df=df,
-        feature_cols=feature_cols,
-        output_dir=sample_output_dir,
-        sample_id=sample_id,
-        patch_h5_path=patch_h5_path,
-        representative_stats=REPRESENTATIVE_STATS,
-    )
+    if save_representative and patch_h5_path is not None:
+        save_representative_visualizations(
+            df=df,
+            feature_cols=feature_cols,
+            output_dir=output_dir,
+            sample_id=sample_id,
+            patch_h5_path=Path(patch_h5_path),
+            representative_stats=representative_stats,
+        )
 
     print("[DONE]")
 
 
-def main():
-    for sample_id in SAMPLE_IDS:
-        process_single_sample(sample_id)
+def statistics_analysis_from_oncotrees(
+    oncotrees: List[str],
+    download_dir: str | Path,
+    sample_ids: Optional[tuple[str, ...]] = None,
+    radiomics_dirname: str = "radiomics",
+    patch_dirname: str = "patches",
+    statistics_dirname: str = "radiomics_statistics",
+    status_filter: Optional[str] = "ok",
+    save_boxplot: bool = True,
+    save_representative: bool = True,
+    representative_stats: Optional[List[str]] = None,
+) -> None:
+    download_dir = Path(download_dir)
 
+    if representative_stats is None:
+        representative_stats = ["min", "q25", "q50", "q75", "max"]
 
-if __name__ == "__main__":
-    main()
+    for oncotree in oncotrees:
+        oncotree_root = download_dir / oncotree
+
+        radiomics_dir = oncotree_root / radiomics_dirname
+        patch_dir = oncotree_root / patch_dirname
+        statistics_root = oncotree_root / statistics_dirname
+
+        if not radiomics_dir.exists():
+            print(f"[SKIP] Radiomics dir not found: {radiomics_dir}")
+            continue
+
+        parquet_paths = sorted(radiomics_dir.glob("*.parquet"))
+
+        if not parquet_paths:
+            print(f"[SKIP] No parquet files found: {radiomics_dir}")
+            continue
+
+        all_sample_ids = [path.stem for path in parquet_paths]
+
+        target_sample_ids = filter_sample_ids(
+            all_sample_ids=all_sample_ids,
+            selected_sample_ids=sample_ids,
+        )
+
+        if not target_sample_ids:
+            print(f"[SKIP] No selected samples found for {oncotree}")
+            continue
+
+        target_sample_id_set = set(target_sample_ids)
+
+        parquet_paths = [
+            path for path in parquet_paths
+            if path.stem in target_sample_id_set
+        ]
+
+        print("=" * 80)
+        print(f"[ONCOTREE] {oncotree}")
+        print(f"[RADIOMICS DIR] {radiomics_dir}")
+        print(f"[PATCH DIR] {patch_dir}")
+        print(f"[OUTPUT DIR] {statistics_root}")
+        print(f"[NUM SAMPLES] {len(parquet_paths)} / {len(all_sample_ids)}")
+        print(f"[STATUS FILTER] {status_filter}")
+        print(f"[SAVE BOXPLOT] {save_boxplot}")
+        print(f"[SAVE REPRESENTATIVE] {save_representative}")
+        print(f"[REPRESENTATIVE STATS] {representative_stats}")
+        print("=" * 80)
+
+        for parquet_path in parquet_paths:
+            sample_id = parquet_path.stem
+            patch_h5_path = patch_dir / f"{sample_id}.h5"
+            sample_output_dir = statistics_root / sample_id
+
+            print(f"\n[SAMPLE] {sample_id}")
+
+            if not patch_h5_path.exists():
+                print(f"[WARN] Patch h5 not found: {patch_h5_path}")
+                print("[WARN] Representative patch visualization will be skipped.")
+
+            process_single_sample_statistics(
+                sample_id=sample_id,
+                parquet_path=parquet_path,
+                patch_h5_path=patch_h5_path if patch_h5_path.exists() else None,
+                output_dir=sample_output_dir,
+                status_filter=status_filter,
+                save_boxplot=save_boxplot,
+                save_representative=save_representative,
+                representative_stats=representative_stats,
+            )
