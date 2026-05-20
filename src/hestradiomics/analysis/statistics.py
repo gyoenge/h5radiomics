@@ -2,627 +2,451 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from hestradiomics.utils import (
-    get_feature_csv_path,
-    get_statistics_dir,
-)
+
+# =============================================================================
+# Config
+# =============================================================================
+
+HEST_ROOT = Path("/root/workspace/hest-radiomics/data/hestradiomics")
+ONCOTREE = "IDC"
+SAMPLE_IDS = ["TENX95"]
+
+RADIOMICS_DIR = HEST_ROOT / ONCOTREE / "radiomics"
+PATCH_DIR = HEST_ROOT / ONCOTREE / "patches"
+OUTPUT_DIR = HEST_ROOT / ONCOTREE / "radiomics_statistics"
+
+REPRESENTATIVE_STATS = ["min", "q25", "q50", "q75", "max"]
+
+META_COLS = {
+    "sample_id",
+    "patch_idx",
+    "barcode",
+    "mask_path",
+    "color_path",
+    "gray_path",
+    "x",
+    "y",
+    "coord_x",
+    "coord_y",
+    "status",
+}
+
+FEATURE_CLASS_PREFIXES = {
+    "cell_count": ["n_cells_total", "cellseg_mask_area"],
+    "cellseg_firstorder": ["cellseg_all_original_firstorder_"],
+    "cellseg_glcm": ["cellseg_all_original_glcm_"],
+    "cellseg_glrlm": ["cellseg_all_original_glrlm_"],
+    "cellseg_glszm": ["cellseg_all_original_glszm_"],
+    "cellseg_gldm": ["cellseg_all_original_gldm_"],
+    "cellseg_ngtdm": ["cellseg_all_original_ngtdm_"],
+    "morph": ["morph_"],
+    "dist": ["dist_"],
+}
 
 
-def load_feature_csv(
-    csv_path: str,
-    status_filter: Optional[str] = "ok",
-) -> pd.DataFrame:
-    df = pd.read_csv(csv_path)
+# =============================================================================
+# Utils
+# =============================================================================
+
+def ensure_dir(path: Path | str) -> None:
+    Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def sanitize_filename(text: str) -> str:
+    text = str(text)
+    text = re.sub(r"[^\w\-.]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    return text[:180]
+
+
+def load_radiomics_parquet(parquet_path: Path, status_filter: Optional[str] = "ok") -> pd.DataFrame:
+    df = pd.read_parquet(parquet_path)
 
     if status_filter is not None and "status" in df.columns:
         df = df[df["status"] == status_filter].copy()
 
-    return df
+    return df.reset_index(drop=True)
 
 
-def get_feature_columns(
-    df: pd.DataFrame,
-    drop_diagnostic: bool = True,
-) -> List[str]:
-    meta_cols = {
-        "patch_idx",
-        "barcode",
-        "color_path",
-        "gray_path",
-        "mask_path",
-        "x",
-        "y",
-        "status",
-    }
-
+def get_feature_columns(df: pd.DataFrame) -> List[str]:
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    feature_cols = [col for col in numeric_cols if col not in meta_cols]
 
-    if drop_diagnostic:
-        feature_cols = [
-            col for col in feature_cols
-            if not col.startswith("diagnostics_")
-        ]
+    feature_cols = [
+        c for c in numeric_cols
+        if c not in META_COLS and not c.startswith("diagnostics_")
+    ]
 
     return feature_cols
 
 
-def compute_feature_statistics(
-    df: pd.DataFrame,
-    feature_cols: List[str],
-) -> pd.DataFrame:
+def assign_feature_class(feature_name: str) -> str:
+    for class_name, prefixes in FEATURE_CLASS_PREFIXES.items():
+        if any(feature_name.startswith(prefix) for prefix in prefixes):
+            return class_name
+    return "others"
+
+
+def group_features_by_class(feature_cols: List[str]) -> Dict[str, List[str]]:
+    grouped: Dict[str, List[str]] = {}
+
+    for col in feature_cols:
+        cls = assign_feature_class(col)
+        grouped.setdefault(cls, []).append(col)
+
+    return grouped
+
+
+# =============================================================================
+# Statistics
+# =============================================================================
+
+def compute_feature_statistics(df: pd.DataFrame, feature_cols: List[str]) -> pd.DataFrame:
     rows = []
 
     for col in feature_cols:
         s = pd.to_numeric(df[col], errors="coerce")
 
-        rows.append(
-            {
-                "feature_name": col,
-                "count": int(s.count()),
-                "nan_count": int(s.isna().sum()),
-                "mean": s.mean(),
-                "std": s.std(),
-                "min": s.min(),
-                "q01": s.quantile(0.01),
-                "q05": s.quantile(0.05),
-                "q10": s.quantile(0.10),
-                "q25": s.quantile(0.25),
-                "median": s.median(),
-                "q50": s.quantile(0.50),
-                "q75": s.quantile(0.75),
-                "q90": s.quantile(0.90),
-                "q95": s.quantile(0.95),
-                "q99": s.quantile(0.99),
-                "max": s.max(),
-                "iqr": s.quantile(0.75) - s.quantile(0.25),
-                "abs_mean": s.abs().mean(),
-                "zero_count": int((s == 0).sum()),
-                "positive_count": int((s > 0).sum()),
-                "negative_count": int((s < 0).sum()),
-            }
-        )
+        rows.append({
+            "feature_class": assign_feature_class(col),
+            "feature_name": col,
+            "count": int(s.count()),
+            "nan_count": int(s.isna().sum()),
+            "nan_ratio": float(s.isna().mean()),
+            "mean": s.mean(),
+            "std": s.std(),
+            "min": s.min(),
+            "q01": s.quantile(0.01),
+            "q05": s.quantile(0.05),
+            "q10": s.quantile(0.10),
+            "q25": s.quantile(0.25),
+            "median": s.median(),
+            "q75": s.quantile(0.75),
+            "q90": s.quantile(0.90),
+            "q95": s.quantile(0.95),
+            "q99": s.quantile(0.99),
+            "max": s.max(),
+            "iqr": s.quantile(0.75) - s.quantile(0.25),
+            "zero_count": int((s == 0).sum()),
+            "positive_count": int((s > 0).sum()),
+            "negative_count": int((s < 0).sum()),
+        })
 
-    return (
-        pd.DataFrame(rows)
-        .sort_values("feature_name")
-        .reset_index(drop=True)
-    )
+    return pd.DataFrame(rows).sort_values(["feature_class", "feature_name"])
 
 
-def summarize_dataset(
+def save_feature_statistics(stats_df: pd.DataFrame, output_dir: Path) -> None:
+    ensure_dir(output_dir)
+    stats_df.to_csv(output_dir / "feature_statistics.csv", index=False)
+    stats_df.to_parquet(output_dir / "feature_statistics.parquet", index=False)
+
+
+# =============================================================================
+# Boxplot by Feature Class
+# =============================================================================
+
+def save_boxplots_by_class(
     df: pd.DataFrame,
     feature_cols: List[str],
-) -> Dict[str, int]:
-    return {
-        "num_rows": len(df),
-        "num_feature_columns": len(feature_cols),
-        "num_total_columns": len(df.columns),
-    }
+    output_dir: Path,
+    sample_id: str,
+) -> None:
+    boxplot_dir = output_dir / "boxplots_by_class"
+    ensure_dir(boxplot_dir)
+
+    grouped = group_features_by_class(feature_cols)
+
+    for class_name, cols in sorted(grouped.items()):
+        data = []
+
+        for col in cols:
+            s = pd.to_numeric(df[col], errors="coerce").dropna()
+            data.append(s.values if len(s) > 0 else np.array([np.nan]))
+
+        fig_width = max(14, len(cols) * 0.28)
+        fig, ax = plt.subplots(figsize=(fig_width, 6))
+
+        ax.boxplot(data, showfliers=False, widths=0.5)
+        ax.set_title(f"{sample_id} | {class_name} Feature Distribution")
+        ax.set_xlabel("Feature")
+        ax.set_ylabel("Value")
+        ax.set_xticks(range(1, len(cols) + 1))
+        ax.set_xticklabels(cols, rotation=90, fontsize=7)
+        ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+        plt.tight_layout()
+        fig.savefig(boxplot_dir / f"{sample_id}__{class_name}__boxplot.png", dpi=200)
+        plt.close(fig)
 
 
-def save_statistics(
-    stats_df: pd.DataFrame,
-    output_dir: str,
-) -> Tuple[str, str]:
-    os.makedirs(output_dir, exist_ok=True)
+# =============================================================================
+# Patch Image Loader
+# =============================================================================
 
-    csv_path = os.path.join(output_dir, "stats.csv")
-    parquet_path = os.path.join(output_dir, "stats.parquet")
-
-    stats_df.to_csv(csv_path, index=False)
-    stats_df.to_parquet(parquet_path, index=False)
-
-    return csv_path, parquet_path
+def get_h5_key(h5: h5py.File, candidates: Tuple[str, ...]) -> str:
+    for key in candidates:
+        if key in h5:
+            return key
+    raise KeyError(f"Cannot find any key from candidates={candidates}. Available keys={list(h5.keys())}")
 
 
-def sanitize_filename(text) -> str:
-    text = str(text)
-    text = re.sub(r"[^\w\-.]+", "_", text)
-    text = re.sub(r"_+", "_", text).strip("_")
-    return text[:180] if len(text) > 180 else text
+def load_patch_image_from_h5(patch_h5_path: Path, patch_idx: int) -> np.ndarray:
+    with h5py.File(patch_h5_path, "r") as h5:
+        img_key = get_h5_key(h5, ("img", "imgs", "images"))
+        img = h5[img_key][int(patch_idx)]
+
+    return img
 
 
-def ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
+# =============================================================================
+# Representative Selection
+# =============================================================================
 
-
-def resolve_patch_path(
-    row: pd.Series,
-    preferred_col: str = "color_path",
-) -> Optional[str]:
-    candidates = [preferred_col, "color_path", "gray_path", "mask_path"]
-    seen = set()
-
-    for col in candidates:
-        if col in seen:
-            continue
-
-        seen.add(col)
-
-        if col in row.index:
-            value = row[col]
-
-            if pd.notna(value) and str(value).strip() != "":
-                return str(value)
-
-    return None
-
-
-def get_target_stat_values(
-    series: pd.Series,
-) -> Optional[Dict[str, float]]:
+def get_target_values(series: pd.Series) -> Dict[str, float]:
     s = pd.to_numeric(series, errors="coerce").dropna()
 
-    if len(s) == 0:
-        return None
-
     return {
-        "min": s.min(),
-        "q10": s.quantile(0.10),
-        "q25": s.quantile(0.25),
-        "q50": s.quantile(0.50),
-        "q75": s.quantile(0.75),
-        "q90": s.quantile(0.90),
-        "max": s.max(),
+        "min": float(s.min()),
+        "q25": float(s.quantile(0.25)),
+        "q50": float(s.quantile(0.50)),
+        "q75": float(s.quantile(0.75)),
+        "max": float(s.max()),
     }
 
 
 def select_representative_row(
     df: pd.DataFrame,
     feature_col: str,
-    target_value: float,
     stat_name: str,
-):
+    target_value: float,
+) -> Optional[pd.Series]:
     temp = df.copy()
     temp[feature_col] = pd.to_numeric(temp[feature_col], errors="coerce")
     temp = temp[temp[feature_col].notna()].copy()
 
     if len(temp) == 0:
-        return None, None
+        return None
 
     if stat_name == "min":
-        idx = temp[feature_col].idxmin()
-    elif stat_name == "max":
-        idx = temp[feature_col].idxmax()
+        return temp.loc[temp[feature_col].idxmin()]
+
+    if stat_name == "max":
+        return temp.loc[temp[feature_col].idxmax()]
+
+    temp["_abs_diff"] = (temp[feature_col] - target_value).abs()
+    return temp.loc[temp["_abs_diff"].idxmin()]
+
+
+# =============================================================================
+# Representative Visualization
+# =============================================================================
+
+def plot_representative_summary(
+    df: pd.DataFrame,
+    feature_col: str,
+    selected_row: pd.Series,
+    selected_value: float,
+    stat_name: str,
+    patch_img: np.ndarray,
+    save_path: Path,
+    sample_id: str,
+) -> None:
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.8))
+
+    # 1) patch image
+    axes[0].imshow(patch_img)
+    axes[0].set_title(
+        f"Representative Patch\n"
+        f"{stat_name} | patch_idx={selected_row.get('patch_idx')}"
+    )
+    axes[0].axis("off")
+
+    # 2) whole slide coordinate position
+    if "x" in df.columns and "y" in df.columns:
+        axes[1].scatter(df["x"], df["y"], s=4, alpha=0.25)
+        axes[1].scatter(
+            selected_row["x"],
+            selected_row["y"],
+            s=80,
+            marker="*",
+            edgecolors="black",
+            linewidths=0.8,
+        )
+        axes[1].invert_yaxis()
+        axes[1].set_title("Position in Whole Slide")
+        axes[1].set_xlabel("x")
+        axes[1].set_ylabel("y")
     else:
-        temp["_abs_diff_"] = (temp[feature_col] - target_value).abs()
-        idx = temp["_abs_diff_"].idxmin()
+        axes[1].text(0.5, 0.5, "No x/y columns", ha="center", va="center")
+        axes[1].set_axis_off()
 
-    row = temp.loc[idx]
-    abs_diff = abs(float(row[feature_col]) - float(target_value))
+    # 3) value position in boxplot
+    s = pd.to_numeric(df[feature_col], errors="coerce").dropna()
 
-    return row, abs_diff
+    axes[2].boxplot(s.values, vert=False, showfliers=False)
+    axes[2].scatter([selected_value], [1], s=80, marker="*", edgecolors="black", linewidths=0.8)
+    axes[2].set_title("Value Position in Distribution")
+    axes[2].set_xlabel(feature_col)
+    axes[2].set_yticks([])
+
+    fig.suptitle(
+        f"{sample_id} | {feature_col}\n"
+        f"{stat_name}: selected={selected_value:.6g}",
+        fontsize=11,
+    )
+
+    plt.tight_layout()
+    fig.savefig(save_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
 
 
-def save_representative_patches(
+def save_representative_visualizations(
     df: pd.DataFrame,
     feature_cols: List[str],
-    output_dir: str,
-    config: dict,
-    prefix: str = "sample",
-) -> str:
-    rep_root = os.path.join(output_dir, "representative")
-    ensure_dir(rep_root)
-
-    requested_stats = config.get(
-        "representative_stats",
-        ["min", "q10", "q25", "q50", "q75", "q90", "max"],
-    )
-    preferred_image_col = config.get("representative_image_col", "color_path")
+    output_dir: Path,
+    sample_id: str,
+    patch_h5_path: Path,
+    representative_stats: List[str],
+) -> None:
+    rep_dir = output_dir / "representatives"
+    ensure_dir(rep_dir)
 
     manifest_rows = []
 
     for feature_col in feature_cols:
-        stat_targets = get_target_stat_values(df[feature_col])
-
-        if stat_targets is None:
-            continue
-
-        feature_dir = os.path.join(rep_root, sanitize_filename(feature_col))
-        ensure_dir(feature_dir)
-
-        for stat_name in requested_stats:
-            if stat_name not in stat_targets:
-                continue
-
-            target_value = stat_targets[stat_name]
-
-            row, abs_diff = select_representative_row(
-                df=df,
-                feature_col=feature_col,
-                target_value=target_value,
-                stat_name=stat_name,
-            )
-
-            if row is None:
-                manifest_rows.append(
-                    {
-                        "feature_name": feature_col,
-                        "stat_name": stat_name,
-                        "target_value": target_value,
-                        "selected_value": np.nan,
-                        "abs_diff": np.nan,
-                        "patch_idx": np.nan,
-                        "barcode": "",
-                        "sample_id": prefix,
-                        "source_path": "",
-                        "saved_path": "",
-                        "status": "no_valid_row",
-                    }
-                )
-                continue
-
-            src_path = resolve_patch_path(
-                row,
-                preferred_col=preferred_image_col,
-            )
-
-            if src_path is None or not os.path.exists(src_path):
-                manifest_rows.append(
-                    {
-                        "feature_name": feature_col,
-                        "stat_name": stat_name,
-                        "target_value": float(target_value),
-                        "selected_value": float(row[feature_col]),
-                        "abs_diff": float(abs_diff),
-                        "patch_idx": row.get("patch_idx", np.nan),
-                        "barcode": row.get("barcode", ""),
-                        "sample_id": row.get("sample_id", prefix),
-                        "source_path": src_path or "",
-                        "saved_path": "",
-                        "status": "missing_source_image",
-                    }
-                )
-                continue
-
-            patch_idx = row.get("patch_idx", "na")
-            sample_id = row.get("sample_id", prefix)
-            barcode = row.get("barcode", "")
-
-            src_ext = os.path.splitext(src_path)[1] or ".png"
-
-            out_name = (
-                f"{stat_name}__sample_{sanitize_filename(sample_id)}"
-                f"__patch_{patch_idx}{src_ext}"
-            )
-            dst_path = os.path.join(feature_dir, out_name)
-
-            shutil.copy2(src_path, dst_path)
-
-            manifest_rows.append(
-                {
-                    "feature_name": feature_col,
-                    "stat_name": stat_name,
-                    "target_value": float(target_value),
-                    "selected_value": float(row[feature_col]),
-                    "abs_diff": float(abs_diff),
-                    "patch_idx": patch_idx,
-                    "barcode": barcode,
-                    "sample_id": sample_id,
-                    "source_path": src_path,
-                    "saved_path": dst_path,
-                    "status": "ok",
-                }
-            )
-
-    manifest_df = pd.DataFrame(manifest_rows)
-    manifest_csv = os.path.join(rep_root, "representative_manifest.csv")
-    manifest_df.to_csv(manifest_csv, index=False)
-
-    return manifest_csv
-
-
-def extract_feature_class(
-    feature_name: str,
-) -> str:
-    parts = str(feature_name).split("_")
-
-    if len(parts) >= 2:
-        return parts[1].lower()
-
-    return "unknown"
-
-
-def save_sample_feature_boxplot(
-    df: pd.DataFrame,
-    feature_cols: List[str],
-    output_dir: str,
-    prefix: str,
-):
-    if len(feature_cols) == 0:
-        return None
-
-    boxplot_dir = os.path.join(output_dir, "boxplots")
-    ensure_dir(boxplot_dir)
-
-    requested_stats = ["min", "q10", "q25", "q50", "q75", "q90", "max"]
-
-    data_for_boxplot = []
-    scatter_x = []
-    scatter_y = []
-
-    for i, feature_col in enumerate(feature_cols, start=1):
         s = pd.to_numeric(df[feature_col], errors="coerce").dropna()
 
         if len(s) == 0:
-            data_for_boxplot.append(np.array([np.nan]))
             continue
 
-        data_for_boxplot.append(s.values)
+        targets = get_target_values(df[feature_col])
+        feature_class = assign_feature_class(feature_col)
 
-        stat_targets = get_target_stat_values(df[feature_col])
+        feature_dir = rep_dir / feature_class / sanitize_filename(feature_col)
+        ensure_dir(feature_dir)
 
-        if stat_targets is None:
-            continue
+        for stat_name in representative_stats:
+            if stat_name not in targets:
+                continue
 
-        for stat_name in requested_stats:
-            row, _ = select_representative_row(
+            target_value = targets[stat_name]
+
+            row = select_representative_row(
                 df=df,
                 feature_col=feature_col,
-                target_value=stat_targets[stat_name],
                 stat_name=stat_name,
+                target_value=target_value,
             )
 
             if row is None:
                 continue
 
-            actual_value = pd.to_numeric(row[feature_col], errors="coerce")
+            patch_idx = int(row["patch_idx"])
+            selected_value = float(row[feature_col])
 
-            if pd.isna(actual_value):
-                continue
+            try:
+                patch_img = load_patch_image_from_h5(patch_h5_path, patch_idx)
+                status = "ok"
+            except Exception as e:
+                patch_img = np.zeros((224, 224, 3), dtype=np.uint8)
+                status = f"patch_load_failed: {e}"
 
-            scatter_x.append(i)
-            scatter_y.append(float(actual_value))
+            save_path = feature_dir / f"{stat_name}__patch_{patch_idx}.png"
 
-    fig_width = max(16, len(feature_cols) * 0.22)
-    fig, ax = plt.subplots(figsize=(fig_width, 6))
+            if status == "ok":
+                plot_representative_summary(
+                    df=df,
+                    feature_col=feature_col,
+                    selected_row=row,
+                    selected_value=selected_value,
+                    stat_name=stat_name,
+                    patch_img=patch_img,
+                    save_path=save_path,
+                    sample_id=sample_id,
+                )
 
-    ax.boxplot(
-        data_for_boxplot,
-        showfliers=False,
-        patch_artist=False,
-        widths=0.5,
-    )
+            manifest_rows.append({
+                "sample_id": sample_id,
+                "feature_class": feature_class,
+                "feature_name": feature_col,
+                "stat_name": stat_name,
+                "target_value": target_value,
+                "selected_value": selected_value,
+                "abs_diff": abs(selected_value - target_value),
+                "patch_idx": patch_idx,
+                "barcode": row.get("barcode", ""),
+                "x": row.get("x", np.nan),
+                "y": row.get("y", np.nan),
+                "figure_path": str(save_path) if status == "ok" else "",
+                "status": status,
+            })
 
-    if scatter_x:
-        ax.scatter(scatter_x, scatter_y, s=10, alpha=0.9)
-
-    ax.set_title(f"Radiomics Feature Distribution ({prefix})")
-    ax.set_xlabel("Feature")
-    ax.set_ylabel("Feature value")
-    ax.set_xticks(range(1, len(feature_cols) + 1))
-    ax.set_xticklabels(feature_cols, rotation=90, fontsize=7)
-    ax.grid(axis="y", linestyle="--", alpha=0.3)
-
-    plt.tight_layout()
-
-    save_path = os.path.join(boxplot_dir, f"{prefix}_feature_boxplot.png")
-    plt.savefig(save_path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-
-    return save_path
-
-
-def save_sample_feature_boxplots_by_class(
-    df: pd.DataFrame,
-    feature_cols: List[str],
-    output_dir: str,
-    prefix: str,
-):
-    if len(feature_cols) == 0:
-        return []
-
-    boxplot_dir = os.path.join(output_dir, "boxplots")
-    ensure_dir(boxplot_dir)
-
-    class_to_features = {}
-
-    for col in feature_cols:
-        cls = extract_feature_class(col)
-        class_to_features.setdefault(cls, []).append(col)
-
-    saved_paths = []
-
-    for feature_class, class_features in sorted(class_to_features.items()):
-        path = save_sample_feature_boxplot(
-            df=df,
-            feature_cols=class_features,
-            output_dir=output_dir,
-            prefix=f"{prefix}_{sanitize_filename(feature_class)}",
-        )
-
-        if path is not None:
-            saved_paths.append(path)
-
-    return saved_paths
+    manifest_df = pd.DataFrame(manifest_rows)
+    manifest_df.to_csv(rep_dir / "representative_manifest.csv", index=False)
 
 
-def process_single_feature_table(
-    sample_id: str,
-    config: dict,
-    feature_type: str,
-):
-    if feature_type not in ("raw", "processed"):
-        raise ValueError(
-            f"feature_type must be 'raw' or 'processed', got: {feature_type}"
-        )
+# =============================================================================
+# Main Pipeline
+# =============================================================================
 
-    csv_path = get_feature_csv_path(
-        config["output_dir"],
-        sample_id,
-        feature_type,
-    )
-    output_dir = get_statistics_dir(
-        config["output_dir"],
-        sample_id,
-        feature_type,
-    )
+def process_single_sample(sample_id: str) -> None:
+    parquet_path = RADIOMICS_DIR / f"{sample_id}.parquet"
+    patch_h5_path = PATCH_DIR / f"{sample_id}.h5"
 
-    if not os.path.exists(csv_path):
-        print(f"[WARNING] CSV not found: {csv_path}")
-        return None
+    sample_output_dir = OUTPUT_DIR / sample_id
+    ensure_dir(sample_output_dir)
 
-    df = load_feature_csv(
-        csv_path=csv_path,
-        status_filter=config["status_filter"],
-    )
+    print("=" * 80)
+    print(f"[SAMPLE] {sample_id}")
+    print(f"[PARQUET] {parquet_path}")
+    print(f"[PATCH H5] {patch_h5_path}")
+    print(f"[OUTPUT] {sample_output_dir}")
 
-    feature_cols = get_feature_columns(
-        df=df,
-        drop_diagnostic=config["drop_diagnostic"],
-    )
+    if not parquet_path.exists():
+        raise FileNotFoundError(f"Missing parquet: {parquet_path}")
 
-    if len(feature_cols) == 0:
-        print(f"[WARNING] No feature columns found: {sample_id}, {feature_type}")
-        return None
+    if not patch_h5_path.exists():
+        raise FileNotFoundError(f"Missing patch h5: {patch_h5_path}")
+
+    df = load_radiomics_parquet(parquet_path)
+    feature_cols = get_feature_columns(df)
+
+    print(f"[ROWS] {len(df)}")
+    print(f"[FEATURE COLS] {len(feature_cols)}")
 
     stats_df = compute_feature_statistics(df, feature_cols)
-    csv_out, parquet_out = save_statistics(stats_df, output_dir)
+    save_feature_statistics(stats_df, sample_output_dir)
 
-    df_for_vis = df.copy()
+    save_boxplots_by_class(
+        df=df,
+        feature_cols=feature_cols,
+        output_dir=sample_output_dir,
+        sample_id=sample_id,
+    )
 
-    if "sample_id" not in df_for_vis.columns:
-        df_for_vis["sample_id"] = sample_id
+    save_representative_visualizations(
+        df=df,
+        feature_cols=feature_cols,
+        output_dir=sample_output_dir,
+        sample_id=sample_id,
+        patch_h5_path=patch_h5_path,
+        representative_stats=REPRESENTATIVE_STATS,
+    )
 
-    if config.get("save_representatives", False):
-        save_representative_patches(
-            df=df_for_vis,
-            feature_cols=feature_cols,
-            output_dir=output_dir,
-            config=config,
-            prefix=f"{sample_id}_{feature_type}",
-        )
-
-    if config.get("save_boxplot", False):
-        save_sample_feature_boxplot(
-            df=df_for_vis,
-            feature_cols=feature_cols,
-            output_dir=output_dir,
-            prefix=f"{sample_id}_{feature_type}",
-        )
-
-        save_sample_feature_boxplots_by_class(
-            df=df_for_vis,
-            feature_cols=feature_cols,
-            output_dir=output_dir,
-            prefix=f"{sample_id}_{feature_type}",
-        )
-
-    return {
-        "sample_id": sample_id,
-        "feature_type": feature_type,
-        "df": df,
-        "feature_cols": feature_cols,
-        "stats_df": stats_df,
-        "output_dir": output_dir,
-        "csv_out": csv_out,
-        "parquet_out": parquet_out,
-    }
+    print("[DONE]")
 
 
-def process_single_sample(
-    sample_id: str,
-    config: dict,
-):
-    results = {}
-
-    for feature_type in ("raw", "processed"):
-        results[feature_type] = process_single_feature_table(
-            sample_id=sample_id,
-            config=config,
-            feature_type=feature_type,
-        )
-
-    return {
-        "sample_id": sample_id,
-        "raw": results.get("raw"),
-        "processed": results.get("processed"),
-    }
+def main():
+    for sample_id in SAMPLE_IDS:
+        process_single_sample(sample_id)
 
 
-def process_merged_samples(
-    results,
-    config: dict,
-):
-    if not config.get("save_merged", False):
-        return
-
-    for feature_type in ("raw", "processed"):
-        collected = []
-
-        for result in results:
-            if result is None:
-                continue
-
-            part = result.get(feature_type)
-
-            if part is None:
-                continue
-
-            temp = part["df"].copy()
-            temp["sample_id"] = result["sample_id"]
-            collected.append(temp)
-
-        if not collected:
-            print(f"[WARNING] No valid merged data for {feature_type}")
-            continue
-
-        merged_df = pd.concat(
-            collected,
-            axis=0,
-            ignore_index=True,
-        )
-
-        feature_cols = get_feature_columns(
-            df=merged_df,
-            drop_diagnostic=config["drop_diagnostic"],
-        )
-
-        merged_stats_df = compute_feature_statistics(
-            merged_df,
-            feature_cols,
-        )
-
-        output_dir = os.path.join(
-            config["output_dir"],
-            "_merged",
-            "statistics",
-            feature_type,
-        )
-
-        save_statistics(
-            merged_stats_df,
-            output_dir,
-        )
-
-        if config.get("save_representatives", False):
-            save_representative_patches(
-                df=merged_df,
-                feature_cols=feature_cols,
-                output_dir=output_dir,
-                config=config,
-                prefix=f"merged_{feature_type}",
-            )
-
-        if config.get("save_boxplot", False):
-            save_sample_feature_boxplot(
-                df=merged_df,
-                feature_cols=feature_cols,
-                output_dir=output_dir,
-                prefix=f"merged_{feature_type}",
-            )
-
-            save_sample_feature_boxplots_by_class(
-                df=merged_df,
-                feature_cols=feature_cols,
-                output_dir=output_dir,
-                prefix=f"merged_{feature_type}",
-            )
+if __name__ == "__main__":
+    main()
